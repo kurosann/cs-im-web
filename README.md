@@ -1,36 +1,45 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# cs-im-web
 
-## Getting Started
+CS IM 的正式 Web 前端工程，用于承接客服工作台和后续产品页面。
 
-First, run the development server:
+当前是工程骨架阶段：使用 Next.js App Router、Tailwind CSS 4 和 shadcn/ui，首页提供基础界面占位。
+
+## 技术栈
+
+- Next.js 16
+- React 19
+- TypeScript
+- Tailwind CSS 4
+- shadcn/ui 与 Radix UI
+- pnpm
+
+## 启动
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+默认访问：
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```text
+http://localhost:3000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 构建与检查
 
-## Learn More
+```bash
+pnpm build
+pnpm lint
+```
 
-To learn more about Next.js, take a look at the following resources:
+## 工程约定
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- 页面放在 `app/`。
+- 复用 UI 组件放在 `components/`。
+- 后续业务 API 调用通过 `cs-im-sdk` 或独立 API client 层封装，不在组件里散落硬编码。
+- 字体和静态资源本地化在 `public/`，避免运行时依赖外部 CDN。
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 当前边界
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+尚未接入后端登录、会话列表和消息流。相关能力会先在后端和 Demo 前端联调，再迁移到本工程。
