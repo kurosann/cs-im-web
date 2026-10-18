@@ -50,29 +50,29 @@
 
 :root {
   --font-geist-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --background: oklch(0.985 0.006 240);
+  --foreground: oklch(0.208 0.035 255);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.208 0.035 255);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  --popover-foreground: oklch(0.208 0.035 255);
+  --primary: oklch(0.585 0.215 264);
+  --primary-foreground: oklch(0.985 0.006 240);
+  --secondary: oklch(0.965 0.008 240);
+  --secondary-foreground: oklch(0.29 0.035 255);
+  --muted: oklch(0.965 0.008 240);
+  --muted-foreground: oklch(0.55 0.035 255);
+  --accent: oklch(0.955 0.025 240);
+  --accent-foreground: oklch(0.29 0.035 255);
+  --destructive: oklch(0.58 0.22 27);
+  --border: oklch(0.91 0.018 240);
+  --input: oklch(0.91 0.018 240);
+  --ring: oklch(0.585 0.215 264);
+  --chart-1: oklch(0.585 0.215 264);
+  --chart-2: oklch(0.72 0.145 215);
+  --chart-3: oklch(0.7 0.16 150);
+  --chart-4: oklch(0.77 0.16 83);
+  --chart-5: oklch(0.64 0.18 40);
   --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
@@ -122,10 +122,34 @@
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
+
   html {
     @apply font-sans;
+  }
+
+  ::selection {
+    background: #dbeafe;
+    color: #1e3a8a;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background: #cbd5e1;
+    background-clip: padding-box;
   }
 }

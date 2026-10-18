@@ -2,7 +2,7 @@
 
 CS IM 的正式 Web 前端工程，用于承接客服工作台和后续产品页面。
 
-当前是工程骨架阶段：使用 Next.js App Router、Tailwind CSS 4 和 shadcn/ui，首页提供基础界面占位。
+当前按 V1 Mock-first 方案开发：使用 Next.js App Router、Tailwind CSS 4 和 shadcn/ui，已建立登录注册、统一工作台 Shell、总览、会话列表和聊天室基础交互。
 
 ## 技术栈
 
@@ -42,4 +42,18 @@ pnpm lint
 
 ## 当前边界
 
-尚未接入后端登录、会话列表和消息流。相关能力会先在后端和 Demo 前端联调，再迁移到本工程。
+当前登录为纯前端 Mock session：
+
+- 注册入口：`/register`
+- 隐私政策：`/privacy`
+- 用户协议：`/terms`
+- 演示账号：`demo`
+- 演示邮箱：`demo@cs-im.local`
+- 演示密码：`demo1234`
+- 登录框支持使用演示账号、演示邮箱或本地注册账号
+- 登录和注册需要勾选同意隐私政策与用户协议
+- 注册账号仅保存在当前浏览器的本地存储中
+- 只保存在浏览器的 `localStorage` / `sessionStorage`
+- 不连接 `cs-im-server`、3001 或 3002
+
+V1 后续会继续补齐业务渠道、转发渠道、AI、Webhook、日志和设置页面。真实登录、AccessToken、权限和远程 API 不属于当前 V1 完成条件。

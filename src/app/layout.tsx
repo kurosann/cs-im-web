@@ -4,9 +4,12 @@ import { GeistMono } from "geist/font/mono";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "CS IM Web",
-  description: "CS IM web",
-};
+  title: {
+    default: "聚合客服 · 统一工作台",
+    template: "%s · 聚合客服",
+  },
+  description: "CS IM 统一客服工作台",
+}
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
@@ -16,5 +19,5 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
-  );
+  )
 }

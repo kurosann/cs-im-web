@@ -1,9 +1,13 @@
-import { Card } from "@/components/ui/card";
+import { AuthGate } from "@/components/auth/auth-gate"
+import { WorkspaceShell } from "@/components/layout/workspace-shell"
+import { V2Overview } from "@/components/v2/v2-overview"
 
 export default function Home() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background p-6">
-      <Card className="h-[720px] w-full max-w-6xl" />
-    </main>
-  );
+    <AuthGate>
+      <WorkspaceShell>
+        <V2Overview />
+      </WorkspaceShell>
+    </AuthGate>
+  )
 }
