@@ -22,6 +22,10 @@ async function rewrites() {
       source: "/api/v1/:path*",
       destination: `${apiBase}/api/v1/:path*`,
     },
+    {
+      source: "/admin/v1/:path*",
+      destination: `${apiBase}/admin/v1/:path*`,
+    },
   ];
 }
 

@@ -127,6 +127,21 @@
   }
 }
 
+@keyframes height-expand {
+  from {
+    max-height: 0;
+    opacity: 0;
+  }
+  to {
+    max-height: 8rem;
+    opacity: 1;
+  }
+}
+
+@utility animate-height-expand {
+  animation: height-expand 200ms ease-out;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

@@ -6,6 +6,7 @@ import {
   BellRing,
   Bot,
   ChevronRight,
+  ChevronsUpDown,
   CircleHelp,
   FileClock,
   KeyRound,
@@ -26,8 +27,15 @@ import { useEffect, useMemo, useState } from "react"
 
 import { WebSession, logout, readSession } from "@/lib/auth"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Sidebar,
   SidebarContent,
@@ -345,10 +353,55 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
           <SidebarFooter className="border-t border-sidebar-border">
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton onClick={handleLogout} tooltip="退出登录">
-                  <LogOut className="size-4" />
-                  <span>退出登录</span>
-                </SidebarMenuButton>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <SidebarMenuButton size="lg" tooltip={session?.displayName ?? "客服专员"}>
+                      <Avatar>
+                        <AvatarFallback>
+                          {session?.displayName.slice(0, 1) ?? "客"}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="grid min-w-0 flex-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
+                        <span className="truncate text-sm font-semibold">
+                          {session?.displayName ?? "客服专员"}
+                        </span>
+                        <span className="truncate text-xs text-sidebar-foreground/60">
+                          {session?.email ?? "member@example.com"}
+                        </span>
+                      </span>
+                      <ChevronsUpDown className="ml-auto size-4 text-sidebar-foreground/60" />
+                    </SidebarMenuButton>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    side="right"
+                    sideOffset={4}
+                    className="min-w-56"
+                  >
+                    <DropdownMenuLabel className="flex items-center gap-2 p-0">
+                      <div className="flex items-center gap-2 px-2 py-1.5">
+                        <Avatar>
+                          <AvatarFallback>
+                            {session?.displayName.slice(0, 1) ?? "客"}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="grid min-w-0 flex-1 leading-tight">
+                          <span className="truncate text-sm font-medium">
+                            {session?.displayName ?? "客服专员"}
+                          </span>
+                          <span className="truncate text-xs text-muted-foreground">
+                            {session?.email ?? "member@example.com"}
+                          </span>
+                        </div>
+                      </div>
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={handleLogout}>
+                      <LogOut className="size-4" />
+                      退出登录
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarFooter>
@@ -373,20 +426,9 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
               </div>
 
               <div className="flex shrink-0 items-center gap-3">
-                <Badge variant="outline" className="hidden lg:inline-flex">
-                  服务运行正常
-                </Badge>
                 <Button variant="ghost" size="icon" aria-label="帮助">
                   <CircleHelp className="size-4" />
                 </Button>
-                <div className="flex items-center gap-2">
-                  <Avatar>
-                    <AvatarFallback>{session?.displayName.slice(0, 1) ?? "客"}</AvatarFallback>
-                  </Avatar>
-                  <span className="max-w-24 truncate text-sm font-medium">
-                    {session?.displayName ?? "客服专员"}
-                  </span>
-                </div>
               </div>
             </div>
           </header>

@@ -5,6 +5,7 @@ import {
   Check,
   Eye,
   EyeOff,
+  Loader2,
   LockKeyhole,
   MessageCircle,
   UserRound,
@@ -50,7 +51,6 @@ export function LoginForm() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setError("")
 
     const normalizedIdentifier = identifier.trim().toLowerCase()
     if (!normalizedIdentifier) {
@@ -69,14 +69,20 @@ export function LoginForm() {
     }
 
     setIsSubmitting(true)
+    const startedAt = performance.now()
     const result = await login(normalizedIdentifier, password, remember)
-    setIsSubmitting(false)
-    if (!result.ok) {
-      setError(result.message)
+
+    if (result.ok) {
+      setIsSubmitting(false)
+      router.replace("/")
       return
     }
 
-    router.replace("/")
+    const remainingTime = Math.max(0, 500 - (performance.now() - startedAt))
+    await new Promise((resolve) => setTimeout(resolve, remainingTime))
+
+    setIsSubmitting(false)
+    setError(result.message)
   }
 
   return (
@@ -236,9 +242,22 @@ export function LoginForm() {
                     </div>
 
                     {error ? (
-                      <Alert variant="destructive">
-                        <AlertDescription>{error}</AlertDescription>
-                      </Alert>
+                      <div
+                        aria-live="polite"
+                        className="overflow-hidden animate-[height-expand_240ms_ease-out]"
+                      >
+                        <Alert variant="destructive" className="min-h-0 overflow-hidden">
+                          {isSubmitting ? (
+                            <div className="flex h-5 min-h-0 items-center justify-start">
+                              <Loader2 className="size-4 animate-spin text-foreground" />
+                            </div>
+                          ) : (
+                            <AlertDescription className="min-h-0">
+                              {error}
+                            </AlertDescription>
+                          )}
+                        </Alert>
+                      </div>
                     ) : null}
 
                     <Button type="submit" className="h-12 w-full" disabled={isSubmitting}>

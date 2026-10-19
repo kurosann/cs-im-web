@@ -5,12 +5,12 @@ import {
   KeyRound,
   MoreHorizontal,
   Plus,
-  RotateCcw,
   Search,
   ShieldCheck,
   UsersRound,
 } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { toast } from "sonner"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -55,6 +55,20 @@ import {
 } from "@/components/ui/table"
 import { TablePagination } from "@/components/ui/table-pagination"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  ChannelCredential,
+  IamApiError,
+  issueChannelCredential,
+  listBusinessApps,
+  listChannelCredentials,
+  registerBusinessApp,
+  rotateChannelCredential,
+  setChannelCredentialStatus,
+  createStaff,
+  listStaff,
+  setStaffRole,
+  setStaffStatus,
+} from "@/lib/iam"
 
 type ManagementKind = "team" | "channel-access" | "audit"
 type EmployeeRole = "admin" | "supervisor" | "agent" | "auditor" | "developer"
@@ -68,7 +82,6 @@ type Employee = {
   name: string
   email: string
   role: EmployeeRole
-  team: string
   status: EmployeeStatus
   lastActiveAt: string
 }
@@ -78,7 +91,6 @@ type BusinessChannel = {
   name: string
   appId: string
   status: BusinessChannelStatus
-  environment: string
   expiresAt: string
   lastUsedAt: string
 }
@@ -105,7 +117,7 @@ type AuditEvent = {
 const meta = {
   team: {
     title: "团队管理",
-    description: "管理员工账号、角色和资源范围。",
+    description: "管理员工账号和角色。",
     icon: UsersRound,
   },
   "channel-access": {
@@ -151,20 +163,6 @@ const auditResultLabels: Record<AuditResult, string> = {
   warning: "需关注",
 }
 
-const initialEmployees: Employee[] = [
-  { id: "emp_admin", name: "系统管理员", email: "admin@cs-im.local", role: "admin", team: "平台管理", status: "active", lastActiveAt: "刚刚" },
-  { id: "emp_supervisor", name: "陈宇", email: "chenyu@cs-im.local", role: "supervisor", team: "客服运营", status: "active", lastActiveAt: "12 分钟前" },
-  { id: "emp_agent", name: "林小东", email: "xiaodong@cs-im.local", role: "agent", team: "海外客服一组", status: "active", lastActiveAt: "4 分钟前" },
-  { id: "emp_auditor", name: "赵铭", email: "zhaoming@cs-im.local", role: "auditor", team: "风控合规", status: "active", lastActiveAt: "昨天" },
-  { id: "emp_developer", name: "吴帆", email: "wufan@cs-im.local", role: "developer", team: "接入平台", status: "disabled", lastActiveAt: "3 天前" },
-]
-
-const initialBusinessChannels: BusinessChannel[] = [
-  { id: "bc_1", name: "官网客服接入", appId: "app_7Kd92mQx", status: "active", environment: "生产环境", expiresAt: "2027-01-18", lastUsedAt: "2 分钟前" },
-  { id: "bc_2", name: "小程序客服接入", appId: "app_ZDlglSlV", status: "expiring", environment: "生产环境", expiresAt: "2026-11-04", lastUsedAt: "1 小时前" },
-  { id: "bc_3", name: "内部测试接入", appId: "app_Test0192", status: "disabled", environment: "测试环境", expiresAt: "2027-03-01", lastUsedAt: "12 天前" },
-]
-
 const initialRelayChannels: RelayChannel[] = [
   { id: "rc_1", name: "Web / 手机", target: "平台统一前端", status: "active", lastDeliveredAt: "刚刚" },
   { id: "rc_2", name: "Telegram", target: "Bot API", status: "active", lastDeliveredAt: "35 秒前" },
@@ -186,8 +184,11 @@ function statusVariant(status: string) {
   return "ghost"
 }
 
-function generateCredential(prefix: string, length = 24) {
-  return `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`.slice(0, prefix.length + 1 + length)
+function formatTime(value?: string | null) {
+  if (!value) return "从未使用"
+  const time = new Date(value)
+  if (Number.isNaN(time.getTime())) return "从未使用"
+  return time.toLocaleString("zh-CN", { dateStyle: "short", timeStyle: "short" })
 }
 
 function FilterBar({
@@ -234,18 +235,51 @@ function EmptyRows({ colSpan, title, description }: { colSpan: number; title: st
   )
 }
 
-function TeamView({ notice }: { notice: (message: string) => void }) {
-  const [employees, setEmployees] = useState(initialEmployees)
+function TeamView() {
+  const [employees, setEmployees] = useState<Employee[]>([])
   const [keyword, setKeyword] = useState("")
   const [role, setRole] = useState("all")
   const [status, setStatus] = useState("all")
   const [createOpen, setCreateOpen] = useState(false)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
-  const [form, setForm] = useState({ name: "", email: "", role: "agent", team: "" })
+  const [form, setForm] = useState({ name: "", email: "", role: "agent" })
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
+  const [createdStaff, setCreatedStaff] = useState<{ email: string; password: string } | null>(null)
+
+  const showError = useCallback((error: unknown) => {
+    toast.error(error instanceof IamApiError ? error.message : "请求失败，请稍后重试。")
+  }, [])
+
+  const loadEmployees = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const staff = await listStaff()
+      setEmployees(staff.map((item) => ({
+        id: item.userKey,
+        name: item.displayName,
+        email: item.email,
+        role: item.role as EmployeeRole,
+        status: item.status as EmployeeStatus,
+        lastActiveAt: formatTime(item.lastLoginAt),
+      })))
+    } catch (error) {
+      showError(error)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [showError])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadEmployees()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [loadEmployees])
 
   const visibleEmployees = useMemo(() => employees.filter((employee) => {
-    const matchesKeyword = [employee.name, employee.email, employee.team].join(" ").toLowerCase().includes(keyword.trim().toLowerCase())
+    const matchesKeyword = [employee.name, employee.email].join(" ").toLowerCase().includes(keyword.trim().toLowerCase())
     const matchesRole = role === "all" || employee.role === role
     const matchesStatus = status === "all" || employee.status === status
     return matchesKeyword && matchesRole && matchesStatus
@@ -256,28 +290,54 @@ function TeamView({ notice }: { notice: (message: string) => void }) {
     page * pageSize,
   )
 
-  function createEmployee() {
+  async function createEmployee() {
     if (!form.name.trim() || !form.email.trim()) return
-    setEmployees((current) => [{
-      id: `emp_${Date.now()}`,
-      name: form.name.trim(),
-      email: form.email.trim(),
-      role: form.role as EmployeeRole,
-      team: form.team.trim() || "未分配",
-      status: "active",
-      lastActiveAt: "从未登录",
-    }, ...current])
-    setCreateOpen(false)
-    setForm({ name: "", email: "", role: "agent", team: "" })
-    notice("员工已创建，初始密码已发送")
+    if (isSaving) return
+    setIsSaving(true)
+    try {
+      const result = await createStaff({
+        displayName: form.name.trim(),
+        email: form.email.trim(),
+        role: form.role,
+      })
+      await loadEmployees()
+      setCreateOpen(false)
+      setForm({ name: "", email: "", role: "agent" })
+      setCreatedStaff({ email: result.user.email, password: result.initialPassword })
+      toast.success("员工已创建")
+    } catch (error) {
+      showError(error)
+    } finally {
+      setIsSaving(false)
+    }
   }
 
-  function toggleEmployee(id: string) {
-    setEmployees((current) => current.map((employee) => employee.id === id ? {
-      ...employee,
-      status: employee.status === "active" ? "disabled" : "active",
-    } : employee))
-    notice("员工状态已更新")
+  async function toggleEmployee(id: string, status: EmployeeStatus) {
+    if (isSaving) return
+    setIsSaving(true)
+    try {
+      await setStaffStatus(id, status)
+      await loadEmployees()
+      toast.success("员工状态已更新")
+    } catch (error) {
+      showError(error)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  async function updateEmployeeRole(id: string, nextRole: EmployeeRole) {
+    if (isSaving) return
+    setIsSaving(true)
+    try {
+      await setStaffRole(id, nextRole)
+      await loadEmployees()
+      toast.success("角色已更新，下一次请求即时生效")
+    } catch (error) {
+      showError(error)
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   return (
@@ -320,7 +380,6 @@ function TeamView({ notice }: { notice: (message: string) => void }) {
               <TableRow>
                 <TableHead>员工</TableHead>
                 <TableHead>角色</TableHead>
-                <TableHead>资源范围</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead>最近活跃</TableHead>
                 <TableHead className="text-right">操作</TableHead>
@@ -339,7 +398,6 @@ function TeamView({ notice }: { notice: (message: string) => void }) {
                     </div>
                   </TableCell>
                   <TableCell><Badge variant="outline">{roleLabels[employee.role]}</Badge></TableCell>
-                  <TableCell className="text-muted-foreground">{employee.team}</TableCell>
                   <TableCell><Badge variant={statusVariant(employee.status)}>{employeeStatusLabels[employee.status]}</Badge></TableCell>
                   <TableCell className="text-xs text-muted-foreground">{employee.lastActiveAt}</TableCell>
                   <TableCell className="text-right">
@@ -348,14 +406,21 @@ function TeamView({ notice }: { notice: (message: string) => void }) {
                         <Button variant="ghost" size="icon-sm" aria-label={`操作 ${employee.name}`}><MoreHorizontal className="size-4" /></Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => toggleEmployee(employee.id)}>{employee.status === "active" ? "禁用账号" : "启用账号"}</DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => notice("初始密码已重新生成")}>重置密码</DropdownMenuItem>
+                        {Object.entries(roleLabels).map(([value, label]) => (
+                          <DropdownMenuItem key={value} onClick={() => updateEmployeeRole(employee.id, value as EmployeeRole)}>
+                            设为{label}
+                          </DropdownMenuItem>
+                        ))}
+                        <DropdownMenuItem onClick={() => toggleEmployee(employee.id, employee.status === "active" ? "disabled" : "active")}>
+                          {employee.status === "active" ? "禁用账号" : "启用账号"}
+                        </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </TableCell>
                 </TableRow>
               ))}
-              {pagedEmployees.length === 0 ? <EmptyRows colSpan={6} title="没有匹配员工" description="调整角色、状态或搜索关键词。" /> : null}
+              {isLoading ? <TableRow><TableCell colSpan={5} className="h-24 text-center text-sm text-muted-foreground">正在加载员工…</TableCell></TableRow> : null}
+              {!isLoading && pagedEmployees.length === 0 ? <EmptyRows colSpan={5} title="没有匹配员工" description="调整角色、状态或搜索关键词。" /> : null}
             </TableBody>
           </Table>
           <TablePagination
@@ -374,7 +439,7 @@ function TeamView({ notice }: { notice: (message: string) => void }) {
             <DialogTitle>创建员工</DialogTitle>
             <DialogDescription>创建后可以按资源范围绑定团队和业务应用。</DialogDescription>
           </DialogHeader>
-          <div className="-mx-4 no-scrollbar max-h-[50vh] overflow-y-auto px-4">
+          <div className="-mx-4 no-scrollbar max-h-[50vh] overflow-y-auto px-4 py-3">
             <FieldGroup>
             <Field><FieldLabel>姓名</FieldLabel><Input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="例如：李清" /></Field>
             <Field><FieldLabel>邮箱</FieldLabel><Input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="name@company.com" /></Field>
@@ -386,7 +451,6 @@ function TeamView({ notice }: { notice: (message: string) => void }) {
               </Select>
               <FieldDescription>角色是权限模板，系统会自动展开为受控能力。</FieldDescription>
             </Field>
-            <Field><FieldLabel>资源范围</FieldLabel><Input value={form.team} onChange={(event) => setForm({ ...form, team: event.target.value })} placeholder="例如：海外客服一组" /></Field>
             </FieldGroup>
           </div>
           <DialogFooter>
@@ -395,12 +459,31 @@ function TeamView({ notice }: { notice: (message: string) => void }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={Boolean(createdStaff)} onOpenChange={(open) => !open && setCreatedStaff(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>初始密码只显示一次</DialogTitle>
+            <DialogDescription>请立即发给员工并提醒登录后修改。</DialogDescription>
+          </DialogHeader>
+          <div className="-mx-4 no-scrollbar max-h-[50vh] overflow-y-auto px-4 py-3">
+            <div className="space-y-3">
+              <div className="rounded-lg border bg-muted/40 p-3 text-sm">{createdStaff?.email}</div>
+              <div className="rounded-lg border bg-muted/40 p-3 font-mono text-xs">{createdStaff?.password}</div>
+              <Button variant="outline" onClick={async () => { await navigator.clipboard.writeText(createdStaff?.password ?? ""); toast.success("初始密码已复制") }}>
+                <Copy className="size-4" />复制初始密码
+              </Button>
+            </div>
+          </div>
+          <DialogFooter><Button onClick={() => setCreatedStaff(null)}>我已保存</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }
 
-function ChannelAccessView({ notice }: { notice: (message: string) => void }) {
-  const [businessChannels, setBusinessChannels] = useState(initialBusinessChannels)
+function ChannelAccessView() {
+  const [businessChannels, setBusinessChannels] = useState<BusinessChannel[]>([])
   const [relayChannels, setRelayChannels] = useState(initialRelayChannels)
   const [keyword, setKeyword] = useState("")
   const [status, setStatus] = useState("all")
@@ -410,7 +493,54 @@ function ChannelAccessView({ notice }: { notice: (message: string) => void }) {
   const [createBusinessOpen, setCreateBusinessOpen] = useState(false)
   const [createRelayOpen, setCreateRelayOpen] = useState(false)
   const [issuedCredential, setIssuedCredential] = useState<{ appId: string; secret: string } | null>(null)
-  const [form, setForm] = useState({ name: "", environment: "生产环境", target: "" })
+  const [form, setForm] = useState({ name: "", target: "" })
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
+
+  const showError = useCallback((error: unknown) => {
+    toast.error(error instanceof IamApiError ? error.message : "请求失败，请稍后重试。")
+  }, [])
+
+  const loadBusinessChannels = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const [apps, credentials] = await Promise.all([listBusinessApps(), listChannelCredentials()])
+      const credentialMap = new Map<string, ChannelCredential>(
+        credentials.map((credential) => [credential.appId, credential])
+      )
+      setBusinessChannels(
+        apps
+          .filter((app) => credentialMap.has(app.appId))
+          .map((app) => {
+            const credential = credentialMap.get(app.appId)
+            const expiresAt = credential?.expiresAt ?? null
+            const expiringSoon = expiresAt
+              ? new Date(expiresAt).getTime() - Date.now() < 30 * 24 * 60 * 60 * 1000
+              : false
+            const status = credential?.status === "active" && expiringSoon ? "expiring" : credential?.status
+            return {
+              id: app.appId,
+              appId: app.appId,
+              name: credential?.name ?? app.displayName,
+              status: (status ?? "active") as BusinessChannelStatus,
+              expiresAt: expiresAt ?? "",
+              lastUsedAt: formatTime(credential?.lastUsedAt),
+            }
+          }),
+      )
+    } catch (error) {
+      showError(error)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [showError])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadBusinessChannels()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [loadBusinessChannels])
 
   const visibleBusiness = useMemo(() => businessChannels.filter((channel) => {
     const matchesKeyword = [channel.name, channel.appId].join(" ").toLowerCase().includes(keyword.trim().toLowerCase())
@@ -434,42 +564,65 @@ function ChannelAccessView({ notice }: { notice: (message: string) => void }) {
     page * pageSize,
   )
 
-  function createBusinessChannel() {
-    if (!form.name.trim()) return
-    const appId = generateCredential("app", 10)
-    const secret = generateCredential("sk_live")
-    setBusinessChannels((current) => [{
-      id: appId, name: form.name.trim(), appId, status: "active",
-      environment: form.environment, expiresAt: "2027-10-19", lastUsedAt: "从未使用",
-    }, ...current])
-    setCreateBusinessOpen(false)
-    setIssuedCredential({ appId, secret })
-    setForm({ name: "", environment: "生产环境", target: "" })
+  async function createBusinessChannel() {
+    const name = form.name.trim()
+    if (!name || isSaving) return
+    setIsSaving(true)
+    try {
+      const app = await registerBusinessApp({ displayName: name, serviceKey: name })
+      const credential = await issueChannelCredential({ appId: app.appId, name })
+      await loadBusinessChannels()
+      setCreateBusinessOpen(false)
+      setIssuedCredential({ appId: credential.credential.appId, secret: credential.secret })
+      setForm({ name: "", target: "" })
+      toast.success("业务渠道已创建")
+    } catch (error) {
+      showError(error)
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   function createRelayChannel() {
     if (!form.name.trim() || !form.target.trim()) return
     setRelayChannels((current) => [{ id: `rc_${Date.now()}`, name: form.name.trim(), target: form.target.trim(), status: "active", lastDeliveredAt: "从未投递" }, ...current])
     setCreateRelayOpen(false)
-    setForm({ name: "", environment: "生产环境", target: "" })
-    notice("转发渠道已创建")
+    setForm({ name: "", target: "" })
+    toast.success("转发渠道已创建")
   }
 
-  function rotateBusinessSecret(id: string) {
-    const appId = businessChannels.find((channel) => channel.id === id)?.appId
-    if (!appId) return
-    setIssuedCredential({ appId, secret: generateCredential("sk_live") })
-    notice("旧 SecretKey 已失效")
+  async function rotateBusinessSecret(id: string) {
+    if (isSaving) return
+    setIsSaving(true)
+    try {
+      const credential = await rotateChannelCredential(id)
+      await loadBusinessChannels()
+      setIssuedCredential({ appId: credential.credential.appId, secret: credential.secret })
+      toast.success("旧 SecretKey 已失效")
+    } catch (error) {
+      showError(error)
+    } finally {
+      setIsSaving(false)
+    }
   }
 
-  function toggleBusinessStatus(id: string, next: BusinessChannelStatus) {
-    setBusinessChannels((current) => current.map((channel) => channel.id === id ? { ...channel, status: next } : channel))
-    notice("业务凭证状态已更新")
+  async function toggleBusinessStatus(id: string, next: Exclude<BusinessChannelStatus, "expiring">) {
+    if (isSaving) return
+    setIsSaving(true)
+    try {
+      await setChannelCredentialStatus(id, next)
+      await loadBusinessChannels()
+      toast.success("业务凭证状态已更新")
+    } catch (error) {
+      showError(error)
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   function toggleRelayStatus(id: string) {
     setRelayChannels((current) => current.map((channel) => channel.id === id ? { ...channel, status: channel.status === "active" ? "disabled" : "active" } : channel))
-    notice("转发渠道状态已更新")
+    toast.success("转发渠道状态已更新")
   }
 
   return (
@@ -482,16 +635,27 @@ function ChannelAccessView({ notice }: { notice: (message: string) => void }) {
       </section>
 
       <Tabs value={tab} onValueChange={(value) => { setPage(1); setTab(value) }}>
-        <TabsList><TabsTrigger value="business">业务渠道</TabsTrigger><TabsTrigger value="relay">转发渠道</TabsTrigger></TabsList>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <TabsList><TabsTrigger value="business">业务渠道</TabsTrigger><TabsTrigger value="relay">转发渠道</TabsTrigger></TabsList>
+          {tab === "business" ? (
+            <Button onClick={() => setCreateBusinessOpen(true)}>
+              <Plus className="size-4" />
+              创建业务渠道
+            </Button>
+          ) : null}
+          {tab === "relay" ? (
+            <Button onClick={() => setCreateRelayOpen(true)}>
+              <Plus className="size-4" />
+              添加转发渠道
+            </Button>
+          ) : null}
+        </div>
 
         <TabsContent value="business" className="mt-4">
           <Card>
-            <CardHeader className="flex-row flex-wrap items-start justify-between gap-3">
-              <div>
-                <CardTitle>业务渠道凭证</CardTitle>
-                <CardDescription>业务后端只能发送客户消息和接收客服消息。</CardDescription>
-              </div>
-              <Button onClick={() => setCreateBusinessOpen(true)}><Plus className="size-4" />创建业务渠道</Button>
+            <CardHeader>
+              <CardTitle>业务渠道凭证</CardTitle>
+              <CardDescription>业务后端只能发送客户消息和接收客服消息。</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <FilterBar
@@ -502,7 +666,7 @@ function ChannelAccessView({ notice }: { notice: (message: string) => void }) {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>渠道</TableHead><TableHead>AppID</TableHead><TableHead>环境</TableHead><TableHead>状态</TableHead><TableHead>到期时间</TableHead><TableHead>最近使用</TableHead><TableHead className="text-right">操作</TableHead>
+                    <TableHead>渠道</TableHead><TableHead>AppID</TableHead><TableHead>状态</TableHead><TableHead>到期时间</TableHead><TableHead>最近使用</TableHead><TableHead className="text-right">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -510,7 +674,6 @@ function ChannelAccessView({ notice }: { notice: (message: string) => void }) {
                     <TableRow key={channel.id}>
                       <TableCell className="font-medium">{channel.name}</TableCell>
                       <TableCell className="font-mono text-xs">{channel.appId}</TableCell>
-                      <TableCell className="text-muted-foreground">{channel.environment}</TableCell>
                       <TableCell><Badge variant={statusVariant(channel.status)}>{businessStatusLabels[channel.status]}</Badge></TableCell>
                       <TableCell className="text-muted-foreground">{channel.expiresAt}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">{channel.lastUsedAt}</TableCell>
@@ -518,7 +681,7 @@ function ChannelAccessView({ notice }: { notice: (message: string) => void }) {
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild><Button variant="ghost" size="icon-sm" aria-label={`操作 ${channel.name}`}><MoreHorizontal className="size-4" /></Button></DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => rotateBusinessSecret(channel.id)}><RotateCcw className="size-3.5" />轮换 SecretKey</DropdownMenuItem>
+                            <DropdownMenuItem className="whitespace-nowrap" onClick={() => rotateBusinessSecret(channel.id)}>更新密钥</DropdownMenuItem>
                             <DropdownMenuItem onClick={() => toggleBusinessStatus(channel.id, channel.status === "disabled" ? "active" : "disabled")}>{channel.status === "disabled" ? "启用" : "禁用"}</DropdownMenuItem>
                             <DropdownMenuItem variant="destructive" onClick={() => toggleBusinessStatus(channel.id, "revoked")}>撤销凭证</DropdownMenuItem>
                           </DropdownMenuContent>
@@ -526,7 +689,10 @@ function ChannelAccessView({ notice }: { notice: (message: string) => void }) {
                       </TableCell>
                     </TableRow>
                   ))}
-                  {pagedBusiness.length === 0 ? <EmptyRows colSpan={7} title="没有匹配凭证" description="调整状态或搜索关键词。" /> : null}
+                  {isLoading ? (
+                    <TableRow><TableCell colSpan={6} className="h-24 text-center text-sm text-muted-foreground">正在加载业务渠道…</TableCell></TableRow>
+                  ) : null}
+                  {!isLoading && pagedBusiness.length === 0 ? <EmptyRows colSpan={6} title="没有匹配凭证" description="调整状态或搜索关键词。" /> : null}
                 </TableBody>
               </Table>
               <TablePagination
@@ -542,12 +708,9 @@ function ChannelAccessView({ notice }: { notice: (message: string) => void }) {
 
         <TabsContent value="relay" className="mt-4">
           <Card>
-            <CardHeader className="flex-row flex-wrap items-start justify-between gap-3">
-              <div>
-                <CardTitle>平台转发渠道</CardTitle>
-                <CardDescription>转发渠道由平台统一持有凭证，不对外签发。</CardDescription>
-              </div>
-              <Button onClick={() => setCreateRelayOpen(true)}><Plus className="size-4" />添加转发渠道</Button>
+            <CardHeader>
+              <CardTitle>平台转发渠道</CardTitle>
+              <CardDescription>转发渠道由平台统一持有凭证，不对外签发。</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <FilterBar
@@ -589,16 +752,9 @@ function ChannelAccessView({ notice }: { notice: (message: string) => void }) {
       <Dialog open={createBusinessOpen} onOpenChange={setCreateBusinessOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader><DialogTitle>创建业务渠道</DialogTitle><DialogDescription>创建后仅返回一次 SecretKey 明文。</DialogDescription></DialogHeader>
-          <div className="-mx-4 no-scrollbar max-h-[50vh] overflow-y-auto px-4">
+          <div className="-mx-4 no-scrollbar max-h-[50vh] overflow-y-auto px-4 py-3">
             <FieldGroup>
             <Field><FieldLabel>渠道名称</FieldLabel><Input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="例如：官网客服接入" /></Field>
-            <Field>
-              <FieldLabel>环境</FieldLabel>
-              <Select value={form.environment} onValueChange={(value) => setForm({ ...form, environment: value })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem value="生产环境">生产环境</SelectItem><SelectItem value="测试环境">测试环境</SelectItem></SelectContent>
-              </Select>
-            </Field>
             </FieldGroup>
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setCreateBusinessOpen(false)}>取消</Button><Button onClick={createBusinessChannel}>创建并签发</Button></DialogFooter>
@@ -608,7 +764,7 @@ function ChannelAccessView({ notice }: { notice: (message: string) => void }) {
       <Dialog open={createRelayOpen} onOpenChange={setCreateRelayOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader><DialogTitle>添加转发渠道</DialogTitle><DialogDescription>连接配置和凭证由平台保存。</DialogDescription></DialogHeader>
-          <div className="-mx-4 no-scrollbar max-h-[50vh] overflow-y-auto px-4">
+          <div className="-mx-4 no-scrollbar max-h-[50vh] overflow-y-auto px-4 py-3">
             <FieldGroup>
             <Field><FieldLabel>渠道名称</FieldLabel><Input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="例如：飞书" /></Field>
             <Field><FieldLabel>投递目标</FieldLabel><Input value={form.target} onChange={(event) => setForm({ ...form, target: event.target.value })} placeholder="例如：Bot API / Webhook 地址" /></Field>
@@ -621,11 +777,11 @@ function ChannelAccessView({ notice }: { notice: (message: string) => void }) {
       <Dialog open={Boolean(issuedCredential)} onOpenChange={(open) => !open && setIssuedCredential(null)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader><DialogTitle>SecretKey 只显示一次</DialogTitle><DialogDescription>请立即复制并保存到业务后端的密钥管理服务。</DialogDescription></DialogHeader>
-          <div className="-mx-4 no-scrollbar max-h-[50vh] overflow-y-auto px-4">
+          <div className="-mx-4 no-scrollbar max-h-[50vh] overflow-y-auto px-4 py-3">
             <div className="space-y-3">
-            <div className="rounded-lg border bg-muted/40 p-3 font-mono text-xs">{issuedCredential?.appId}</div>
-            <div className="rounded-lg border bg-muted/40 p-3 font-mono text-xs">{issuedCredential?.secret}</div>
-            <Button variant="outline" onClick={async () => { await navigator.clipboard.writeText(issuedCredential?.secret ?? ""); notice("SecretKey 已复制") }}>
+            <div className="space-y-1"><p className="text-xs text-muted-foreground">AppID</p><div className="rounded-lg border bg-muted/40 p-3 font-mono text-xs break-all">{issuedCredential?.appId}</div></div>
+            <div className="space-y-1"><p className="text-xs text-muted-foreground">SecretKey</p><div className="rounded-lg border bg-muted/40 p-3 font-mono text-xs break-all">{issuedCredential?.secret}</div></div>
+            <Button variant="outline" onClick={async () => { await navigator.clipboard.writeText(issuedCredential?.secret ?? ""); toast.success("SecretKey 已复制") }}>
               <Copy className="size-4" />复制 SecretKey
             </Button>
             </div>
@@ -707,7 +863,7 @@ function AuditView() {
       <Dialog open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader><DialogTitle>{selected?.event}</DialogTitle><DialogDescription>{selected?.id}</DialogDescription></DialogHeader>
-          <div className="-mx-4 no-scrollbar max-h-[50vh] overflow-y-auto px-4">
+          <div className="-mx-4 no-scrollbar max-h-[50vh] overflow-y-auto px-4 py-3">
             <div className="space-y-2 rounded-lg border p-4 text-sm">
             {[["操作", selected?.action], ["操作人", selected?.operator], ["对象", selected?.object], ["结果", selected ? auditResultLabels[selected.result] : ""], ["IP", selected?.ip], ["时间", selected?.time]].map(([label, value]) => (
               <div key={label} className="flex items-start justify-between gap-4"><span className="text-muted-foreground">{label}</span><span className="text-right font-medium">{value}</span></div>
@@ -723,12 +879,6 @@ function AuditView() {
 
 export function PlatformManagement({ kind }: { kind: ManagementKind }) {
   const { title, description, icon: Icon } = meta[kind]
-  const [notice, setNotice] = useState("")
-
-  function showNotice(message: string) {
-    setNotice(message)
-    window.setTimeout(() => setNotice(""), 2200)
-  }
 
   return (
     <div className="space-y-4">
@@ -742,11 +892,9 @@ export function PlatformManagement({ kind }: { kind: ManagementKind }) {
         </div>
       </div>
 
-      {kind === "team" ? <TeamView notice={showNotice} /> : null}
-      {kind === "channel-access" ? <ChannelAccessView notice={showNotice} /> : null}
+      {kind === "team" ? <TeamView /> : null}
+      {kind === "channel-access" ? <ChannelAccessView /> : null}
       {kind === "audit" ? <AuditView /> : null}
-
-      {notice ? <p aria-live="polite" className="text-center text-sm text-muted-foreground">{notice}</p> : null}
     </div>
   )
 }
