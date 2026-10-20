@@ -322,6 +322,12 @@ export const quickReplies = [
   { id: "q6", title: "VIP 优先", shortcut: "/vip", category: "会员", scope: "租户", variables: ["{customer_name}"], zh: "已为您升级为优先处理，请您放心。", en: "Your case has been prioritized. Please rest assured.", es: "Su caso ha sido priorizado. Puede estar tranquilo." },
 ]
 
+export const aiSuggestions = [
+  { english: "The refund is under review and will arrive in 1-2 business days.", chinese: "退款正在复核中，预计 1-2 个工作日到账。" },
+  { english: "I have expedited your case and will notify you once it is processed.", chinese: "我已为您的订单加急处理，完成后会通知您。" },
+  { english: "Would you like me to send the refund progress screenshot?", chinese: "需要我把退款进度截图发给您吗？" },
+]
+
 export type AiSuggestion = {
   id: string
   conversationId: string
