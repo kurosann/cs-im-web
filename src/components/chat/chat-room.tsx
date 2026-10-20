@@ -15,6 +15,8 @@ import {
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
+import { copyText } from "@/lib/copy-text"
+
 import {
   aiSuggestions,
   knowledgeBases,
@@ -603,7 +605,7 @@ export function ChatRoom() {
     if (!message.text) return
 
     try {
-      await navigator.clipboard.writeText(message.text)
+      await copyText(message.text)
       setCopiedMessageId(message.id)
       toast.success("已复制消息")
       window.setTimeout(() => {

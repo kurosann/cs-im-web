@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { copyText, selectElementText } from "@/lib/copy-text"
 import {
   Select,
   SelectContent,
@@ -140,6 +141,17 @@ const auditResultLabels: Record<AuditResult, string> = {
   success: "成功",
   denied: "已拒绝",
   warning: "需关注",
+}
+
+function copyShownValue(value: string, button: HTMLButtonElement, success: string) {
+  const source = button.parentElement?.querySelector<HTMLElement>("[data-copy-source]")
+  void copyText(value).then(
+    () => toast.success(success),
+    () => {
+      if (source) selectElementText(source)
+      toast.error("自动复制被浏览器拦截，内容已选中，请按 ⌘C 复制")
+    },
+  )
 }
 
 function auditResultLabel(value: AuditResult) {
@@ -564,8 +576,8 @@ function TeamView() {
           <div className="-mx-4 no-scrollbar max-h-[50vh] overflow-y-auto px-4 py-3">
             <div className="space-y-3">
               <div className="rounded-lg border bg-muted/40 p-3 text-sm">{resetPassword?.email}</div>
-              <div className="rounded-lg border bg-muted/40 p-3 font-mono text-xs break-all whitespace-pre-wrap">{resetPassword?.password}</div>
-              <Button variant="outline" onClick={async () => { await navigator.clipboard.writeText(resetPassword?.password ?? ""); toast.success("新密码已复制") }}>
+              <div data-copy-source className="rounded-lg border bg-muted/40 p-3 font-mono text-xs break-all whitespace-pre-wrap">{resetPassword?.password}</div>
+              <Button variant="outline" type="button" onClick={(event) => copyShownValue(resetPassword?.password ?? "", event.currentTarget, "新密码已复制")}>
                 <Copy className="size-4" />复制新密码
               </Button>
             </div>
@@ -617,8 +629,8 @@ function TeamView() {
           <div className="-mx-4 no-scrollbar max-h-[50vh] overflow-y-auto px-4 py-3">
             <div className="space-y-3">
               <div className="rounded-lg border bg-muted/40 p-3 text-sm">{createdStaff?.email}</div>
-              <div className="rounded-lg border bg-muted/40 p-3 font-mono text-xs break-all whitespace-pre-wrap">{createdStaff?.password}</div>
-              <Button variant="outline" onClick={async () => { await navigator.clipboard.writeText(createdStaff?.password ?? ""); toast.success("初始密码已复制") }}>
+              <div data-copy-source className="rounded-lg border bg-muted/40 p-3 font-mono text-xs break-all whitespace-pre-wrap">{createdStaff?.password}</div>
+              <Button variant="outline" type="button" onClick={(event) => copyShownValue(createdStaff?.password ?? "", event.currentTarget, "初始密码已复制")}>
                 <Copy className="size-4" />复制初始密码
               </Button>
             </div>
@@ -969,8 +981,8 @@ function ChannelAccessView() {
           <div className="-mx-4 no-scrollbar max-h-[50vh] overflow-y-auto px-4 py-3">
             <div className="space-y-3">
             <div className="space-y-1"><p className="text-xs text-muted-foreground">AppID</p><div className="rounded-lg border bg-muted/40 p-3 font-mono text-xs break-all">{issuedCredential?.appId}</div></div>
-            <div className="space-y-1"><p className="text-xs text-muted-foreground">SecretKey</p><div className="rounded-lg border bg-muted/40 p-3 font-mono text-xs break-all">{issuedCredential?.secret}</div></div>
-            <Button variant="outline" onClick={async () => { await navigator.clipboard.writeText(issuedCredential?.secret ?? ""); toast.success("SecretKey 已复制") }}>
+            <div className="space-y-1"><p className="text-xs text-muted-foreground">SecretKey</p><div data-copy-source className="rounded-lg border bg-muted/40 p-3 font-mono text-xs break-all">{issuedCredential?.secret}</div></div>
+            <Button variant="outline" type="button" onClick={(event) => copyShownValue(issuedCredential?.secret ?? "", event.currentTarget, "SecretKey 已复制")}>
               <Copy className="size-4" />复制 SecretKey
             </Button>
             </div>

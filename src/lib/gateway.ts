@@ -82,7 +82,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return payload.data
 }
 
-export function listConversations(input: {
+export async function listConversations(input: {
   keyword?: string
   status?: string
   page?: number
@@ -93,7 +93,10 @@ export function listConversations(input: {
   if (input.status && input.status !== "all") params.set("status", input.status)
   if (input.page) params.set("page", String(input.page))
   if (input.pageSize) params.set("pageSize", String(input.pageSize))
-  return request<ConversationPage>(`/admin/v1/conversations?${params.toString()}`)
+  const data = await request<ConversationPage | Conversation[] | null>(`/admin/v1/conversations?${params.toString()}`)
+  if (Array.isArray(data)) return { items: data, total: data.length }
+  const items = data?.items ?? []
+  return { items, total: data?.total ?? items.length }
 }
 
 export function markConversationRead(conversationId: string) {
