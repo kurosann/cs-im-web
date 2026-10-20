@@ -34,7 +34,7 @@ export function TablePagination({
   const end = Math.min(currentPage * pageSize, total)
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
+    <div className="-mt-4 flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
       <p className="text-xs text-muted-foreground">
         显示 {start}-{end} 条，共 {total} 条
       </p>

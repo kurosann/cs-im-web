@@ -13,6 +13,7 @@ import {
   LibraryBig,
   LayoutDashboard,
   LogOut,
+  MonitorCog,
   MessageSquareText,
   Settings2,
   ShieldCheck,
@@ -26,6 +27,7 @@ import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
 
 import { WebSession, logout, readSession } from "@/lib/auth"
+import { listConversations } from "@/lib/gateway"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import {
@@ -62,6 +64,7 @@ type NavItem = {
   label: string
   icon: React.ComponentType<{ className?: string; strokeWidth?: number }>
   count?: number
+  alert?: boolean
   children?: Array<{
     href: string
     label: string
@@ -79,17 +82,18 @@ const platformItems: NavItem[] = [
     label: "团队管理",
     icon: UsersRound,
     children: [
-      { href: "/team", label: "员工" },
+    { href: "/team", label: "员工管理" },
       { href: "/roles", label: "角色管理" },
     ],
   },
   { href: "/channel-access", label: "渠道接入", icon: KeyRound },
+  { href: "/monitor", label: "渠道监控", icon: MonitorCog },
   { href: "/audit", label: "审计日志", icon: ShieldCheck },
 ]
 
 const conversationItems: NavItem[] = [
-  { href: "/conversations", label: "会话", icon: MessageSquareText, count: 12 },
-  { href: "/chat", label: "聊天室", icon: Activity },
+  { href: "/conversations", label: "会话", icon: MessageSquareText, alert: true },
+  { href: "/chat", label: "客服聊天", icon: Activity, alert: true },
 ]
 
 const aiItems: NavItem[] = [
@@ -150,9 +154,9 @@ const pageTitles: Record<string, { eyebrow: string; title: string; description: 
     description: "集中处理来自各个渠道的客户消息。",
   },
   "/chat": {
-    eyebrow: "会话服务",
-    title: "聊天室",
-    description: "使用翻译、快捷回复和 AI 建议协助处理会话。",
+    eyebrow: "客户服务",
+    title: "客服聊天",
+    description: "使用快捷回复和 AI 建议协助处理会话。",
   },
   "/ai": {
     eyebrow: "工作台",
@@ -181,7 +185,7 @@ const pageTitles: Record<string, { eyebrow: string; title: string; description: 
   },
   "/team": {
     eyebrow: "团队管理",
-    title: "员工",
+    title: "员工管理",
     description: "管理员工账号、角色和状态。",
   },
   "/roles": {
@@ -193,6 +197,11 @@ const pageTitles: Record<string, { eyebrow: string; title: string; description: 
     eyebrow: "平台管理",
     title: "渠道接入",
     description: "管理业务渠道 AppID 和平台转发渠道。",
+  },
+  "/monitor": {
+    eyebrow: "平台管理",
+    title: "渠道监控",
+    description: "查看渠道健康、投递状态、转发链路和告警。",
   },
   "/audit": {
     eyebrow: "平台管理",
@@ -228,10 +237,12 @@ function NavGroup({
   label,
   items,
   pathname,
+  counts,
 }: {
   label: string
   items: NavItem[]
   pathname: string
+  counts?: Record<string, number>
 }) {
   return (
     <SidebarGroup>
@@ -247,6 +258,7 @@ function NavGroup({
               return (
                 <CollapsiblePrimitive.Root
                   key={`${item.href}-${isChildActive ? "active" : "idle"}`}
+                  className="group/collapsible"
                   defaultOpen={isChildActive}
                 >
                   <SidebarMenuItem>
@@ -254,7 +266,7 @@ function NavGroup({
                       <SidebarMenuButton isActive={isChildActive} tooltip={item.label}>
                         <Icon className="size-4" strokeWidth={2.2} />
                         <span>{item.label}</span>
-                        <ChevronRight className="ml-auto size-4 transition-transform duration-200 data-[state=open]:rotate-90" />
+                        <ChevronRight className="ml-auto size-4 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
                       </SidebarMenuButton>
                     </CollapsiblePrimitive.Trigger>
                     <CollapsiblePrimitive.Content>
@@ -283,8 +295,13 @@ function NavGroup({
                     <span>{item.label}</span>
                   </Link>
                 </SidebarMenuButton>
-                {item.count ? (
-                  <SidebarMenuBadge>{item.count}</SidebarMenuBadge>
+                {item.alert && (counts?.[item.href] ?? 0) > 0 ? (
+                  <SidebarMenuBadge
+                    aria-label={`未读 ${counts?.[item.href]} 条`}
+                    className="min-w-5 rounded-full bg-destructive px-1.5 py-0 text-[10px] font-semibold text-white"
+                  >
+                    {counts?.[item.href] ?? 0}
+                  </SidebarMenuBadge>
                 ) : null}
               </SidebarMenuItem>
             )
@@ -299,12 +316,42 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
   const [session, setSession] = useState<WebSession | null>(null)
+  const [menuCounts, setMenuCounts] = useState<Record<string, number>>({})
 
   useEffect(() => {
     const timer = window.setTimeout(() => setSession(readSession()), 0)
 
     return () => window.clearTimeout(timer)
   }, [])
+
+  useEffect(() => {
+    if (!session) return
+
+    let active = true
+    const loadUnreadCounts = async () => {
+      try {
+        const page = await listConversations({ page: 1, pageSize: 100 })
+        if (!active) return
+        const unreadCount = page.items.reduce((total, item) => total + (item.unreadCount ?? 0), 0)
+        setMenuCounts({
+          "/conversations": unreadCount,
+          "/chat": unreadCount,
+        })
+      } catch {
+        if (active) setMenuCounts({})
+      }
+    }
+
+    void loadUnreadCounts()
+    window.addEventListener("cs-im:unread-changed", loadUnreadCounts)
+    const timer = window.setInterval(loadUnreadCounts, 15000)
+
+    return () => {
+      active = false
+      window.removeEventListener("cs-im:unread-changed", loadUnreadCounts)
+      window.clearInterval(timer)
+    }
+  }, [session])
 
   const pageMeta = useMemo(
     () =>
@@ -343,10 +390,10 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
 
           <SidebarContent>
             <NavGroup label="工作台" items={workItems} pathname={pathname} />
-            <NavGroup label="平台管理" items={platformItems} pathname={pathname} />
-            <NavGroup label="会话服务" items={conversationItems} pathname={pathname} />
+            <NavGroup label="客户服务" items={conversationItems} pathname={pathname} counts={menuCounts} />
             <NavGroup label="AI 配置" items={aiItems} pathname={pathname} />
-            <NavGroup label="流程控制" items={flowItems} pathname={pathname} />
+            <NavGroup label="流程工作" items={flowItems} pathname={pathname} />
+            <NavGroup label="平台管理" items={platformItems} pathname={pathname} />
             <NavGroup label="系统设置" items={systemItems} pathname={pathname} />
           </SidebarContent>
 

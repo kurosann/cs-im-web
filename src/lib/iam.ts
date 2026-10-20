@@ -31,11 +31,42 @@ export type Staff = {
   role: string
   status: string
   lastLoginAt?: string | null
+  online?: boolean
+  device?: string | null
+  ip?: string | null
+  lastActiveAt?: string | null
 }
 
 export type CreatedStaff = {
   user: Staff
   initialPassword: string
+}
+
+export type Role = {
+  roleKey: string
+  name: string
+  description: string
+  kind: "system" | "custom"
+  status: "active" | "disabled"
+  scopes: string[]
+  members: number
+}
+
+export type AuditLog = {
+  id: number
+  event: string
+  action: string
+  operator: string
+  object: string
+  result: "success" | "denied" | "warning"
+  ip: string
+  device: string
+  createdAt: string
+}
+
+export type AuditLogPage = {
+  items: AuditLog[]
+  total: number
 }
 
 type ApiEnvelope<T> = {
@@ -120,9 +151,15 @@ export function rotateChannelCredential(appId: string) {
 
 export function setChannelCredentialStatus(appId: string, status: "active" | "disabled" | "revoked") {
   return request<ChannelCredential>(
-    `/admin/v1/iam/channel-access/apps/${appId}/${status}`,
+    `/admin/v1/iam/channel-access/apps/${appId}/${status === "revoked" ? "revoke" : status}`,
     { method: "POST" },
   )
+}
+
+export function deleteChannelCredential(appId: string) {
+  return request<string>(`/admin/v1/iam/channel-access/apps/${appId}`, {
+    method: "DELETE",
+  })
 }
 
 export function listStaff() {
@@ -132,6 +169,13 @@ export function listStaff() {
 export function createStaff(input: { displayName: string; email: string; role: string }) {
   return request<CreatedStaff>("/admin/v1/iam/staff", {
     method: "POST",
+    body: JSON.stringify(input),
+  })
+}
+
+export function updateStaff(userKey: string, input: { displayName: string; email: string; role: string }) {
+  return request<Staff>(`/admin/v1/iam/staff/${userKey}`, {
+    method: "PUT",
     body: JSON.stringify(input),
   })
 }
@@ -148,4 +192,46 @@ export function setStaffStatus(userKey: string, status: "active" | "disabled") {
     method: "POST",
     body: JSON.stringify({ status }),
   })
+}
+
+export function forceStaffLogout(userKey: string) {
+  return request<string>(`/admin/v1/iam/staff/${userKey}/logout`, { method: "POST" })
+}
+
+export function listRoles() {
+  return request<Role[]>("/admin/v1/iam/roles")
+}
+
+export function createRole(input: Pick<Role, "name" | "description" | "status" | "scopes">) {
+  return request<Role>("/admin/v1/iam/roles", {
+    method: "POST",
+    body: JSON.stringify(input),
+  })
+}
+
+export function updateRole(roleKey: string, input: Pick<Role, "name" | "description" | "status" | "scopes">) {
+  return request<Role>(`/admin/v1/iam/roles/${roleKey}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  })
+}
+
+export function deleteRole(roleKey: string) {
+  return request<string>(`/admin/v1/iam/roles/${roleKey}`, { method: "DELETE" })
+}
+
+export function listAuditLogs(input: {
+  keyword?: string
+  action?: string
+  result?: string
+  page?: number
+  pageSize?: number
+}) {
+  const params = new URLSearchParams()
+  if (input.keyword) params.set("keyword", input.keyword)
+  if (input.action) params.set("action", input.action)
+  if (input.result && input.result !== "all") params.set("result", input.result)
+  if (input.page) params.set("page", String(input.page))
+  if (input.pageSize) params.set("pageSize", String(input.pageSize))
+  return request<AuditLogPage>(`/admin/v1/iam/audit-logs?${params.toString()}`)
 }

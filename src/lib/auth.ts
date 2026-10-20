@@ -14,11 +14,32 @@ const SESSION_SESSION_KEY = "cs-im-web.session.session"
 export type LoginResult = { ok: true } | { ok: false; message: string }
 
 const roleLabels: Record<string, string> = {
+  owner: "超级管理员",
   admin: "管理员",
   supervisor: "客服主管",
   agent: "客服专员",
   auditor: "审计员",
   developer: "开发者",
+}
+
+const authErrorMessages: Record<string, string> = {
+  "invalid identifier or password": "邮箱/账号或密码不正确。",
+  "identifier and password are required": "请输入邮箱/账号和密码。",
+  "displayName, email and password are required": "请填写姓名、邮箱和密码。",
+  "password must contain at least 8 characters": "密码至少需要 8 位。",
+  "email already exists": "该邮箱已注册。",
+}
+
+function translateAuthError(message?: string, fallback: string = "登录失败，请稍后重试。") {
+  if (!message) return fallback
+  return authErrorMessages[message] ?? message
+}
+
+export type RegisterInput = {
+  displayName: string
+  email: string
+  password: string
+  tenantName?: string
 }
 
 export async function login(
@@ -34,7 +55,7 @@ export async function login(
     })
     const payload = await response.json()
     if (!response.ok || payload?.code !== "OK") {
-      return { ok: false, message: payload?.message ?? "登录失败，请稍后重试。" }
+      return { ok: false, message: translateAuthError(payload?.message, "登录失败，请稍后重试。") }
     }
     const data = payload.data
     const user = data.user
@@ -45,6 +66,37 @@ export async function login(
         email: user.email,
         role: roleLabels[user.role] ?? "客服专员",
         workspace: "客服工作区",
+        createdAt: new Date().toISOString(),
+        token: data.token.token,
+      },
+      remember,
+    )
+    return { ok: true }
+  } catch {
+    return { ok: false, message: "无法连接服务，请稍后重试。" }
+  }
+}
+
+export async function register(input: RegisterInput, remember = true): Promise<LoginResult> {
+  try {
+    const response = await fetch("/api/v1/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    })
+    const payload = await response.json()
+    if (!response.ok || payload?.code !== "OK") {
+      return { ok: false, message: translateAuthError(payload?.message, "注册失败，请稍后重试。") }
+    }
+    const data = payload.data
+    const user = data.user
+    writeSession(
+      {
+        userId: user.userKey,
+        displayName: user.displayName || user.account,
+        email: user.email,
+        role: roleLabels[user.role] ?? "客服专员",
+        workspace: user.tenantId,
         createdAt: new Date().toISOString(),
         token: data.token.token,
       },
