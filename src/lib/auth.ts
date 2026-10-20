@@ -119,6 +119,34 @@ export async function logout(): Promise<void> {
   clearSession()
 }
 
+export async function changeOwnPassword(input: {
+  currentPassword: string
+  newPassword: string
+}): Promise<LoginResult> {
+  const session = readSession()
+  if (!session) {
+    return { ok: false, message: "请先登录。" }
+  }
+
+  try {
+    const response = await fetch("/api/v1/auth/password", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.token}`,
+      },
+      body: JSON.stringify(input),
+    })
+    const payload = await response.json()
+    if (!response.ok || payload?.code !== "OK") {
+      return { ok: false, message: translateAuthError(payload?.message, "修改密码失败，请稍后重试。") }
+    }
+    return { ok: true }
+  } catch {
+    return { ok: false, message: "无法连接服务，请稍后重试。" }
+  }
+}
+
 export function readSession(): WebSession | null {
   if (typeof window === "undefined") {
     return null

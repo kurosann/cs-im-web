@@ -1,12 +1,10 @@
-import {
-  CircleAlert,
-  Database,
-  Globe,
-  HeartPulse,
-  ShieldCheck,
-} from "lucide-react"
+"use client"
+
+import { RefreshCw, WifiOff } from "lucide-react"
+import { useCallback, useEffect, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   Card,
   CardContent,
@@ -16,215 +14,216 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
+import { listChannelMonitor, type ChannelMonitorResult } from "@/lib/iam"
 
-const healthMetrics = [
-  {
-    label: "渠道健康度",
-    value: "98.6%",
-    hint: "近 24 小时平均可用性",
-    valuePercent: 98.6,
-    icon: HeartPulse,
-  },
-  {
-    label: "接口成功率",
-    value: "99.4%",
-    hint: "最近 5 分钟 · 12,480 次请求",
-    valuePercent: 99.4,
-    icon: ShieldCheck,
-  },
-  {
-    label: "平均响应",
-    value: "86ms",
-    hint: "P95 响应 214ms",
-    valuePercent: 78,
-    icon: Globe,
-  },
-  {
-    label: "活跃告警",
-    value: "2",
-    hint: "1 条需处理 · 1 条观察中",
-    valuePercent: 20,
-    icon: CircleAlert,
-  },
-]
-
-const resources = [
-  { label: "入站消息速率", value: 72, display: "126 条/分钟", icon: Globe },
-  { label: "投递成功率", value: 94, display: "99.2%", icon: ShieldCheck },
-  { label: "转发队列占用", value: 35, display: "18 / 50", icon: Database },
-]
-
-const services = [
-  {
-    name: "网页渠道",
-    status: "healthy",
-    detail: "3 个实例全部在线",
-    latency: "42ms",
-    uptime: "99.98%",
-  },
-  {
-    name: "Telegram",
-    status: "healthy",
-    detail: "队列积压 128 条",
-    latency: "118ms",
-    uptime: "99.92%",
-  },
-  {
-    name: "WhatsApp",
-    status: "warning",
-    detail: "推理队列延迟升高",
-    latency: "682ms",
-    uptime: "99.61%",
-  },
-  {
-    name: "平台转发",
-    status: "healthy",
-    detail: "2 个转发通道在线",
-    latency: "96ms",
-    uptime: "99.87%",
-  },
-] as const
-
-const alerts = [
-  {
-    level: "warning",
-    title: "AI 推理队列延迟超过 500ms",
-    description: "建议检查推理实例负载，必要时扩容或降低并发。",
-    time: "4 分钟前",
-  },
-  {
-    level: "notice",
-    title: "渠道 Webhook 重试率上升",
-    description: "近 10 分钟重试 6 次，当前未影响消息可达性。",
-    time: "18 分钟前",
-  },
-]
-
-const serviceStatus: Record<(typeof services)[number]["status"], { label: string; variant: "secondary" | "outline" }> = {
-  healthy: { label: "正常", variant: "secondary" },
-  warning: { label: "需关注", variant: "outline" },
+const healthLabels: Record<string, string> = {
+  online: "在线",
+  warning: "积压",
+  offline: "离线",
+  disabled: "已禁用",
 }
 
-const alertStyle: Record<string, { icon: typeof CircleAlert; label: string; variant: "outline" | "destructive" }> = {
-  warning: { icon: CircleAlert, label: "需处理", variant: "destructive" },
-  notice: { icon: CircleAlert, label: "观察中", variant: "outline" },
+function healthVariant(value: string) {
+  if (value === "online") return "secondary"
+  if (value === "warning") return "outline"
+  if (value === "offline") return "destructive"
+  return "ghost"
+}
+
+function formatTime(value?: string | null) {
+  if (!value) return "从未"
+  const time = new Date(value)
+  if (Number.isNaN(time.getTime())) return "从未"
+  return time.toLocaleString("zh-CN", { dateStyle: "short", timeStyle: "medium" })
 }
 
 export function PlatformMonitor() {
+  const [data, setData] = useState<ChannelMonitorResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+
+  const load = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true)
+    else setLoading(true)
+    setError(null)
+
+    try {
+      setData(await listChannelMonitor())
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "加载渠道监控失败，请稍后重试。")
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    const initialTimer = window.setTimeout(() => void load(), 0)
+    const refreshTimer = window.setInterval(() => void load(true), 30000)
+
+    return () => {
+      window.clearTimeout(initialTimer)
+      window.clearInterval(refreshTimer)
+    }
+  }, [load])
+
+  if (loading) {
+    return (
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <Card key={index}>
+            <CardContent className="h-28 animate-pulse bg-muted/40" />
+          </Card>
+        ))}
+      </div>
+    )
+  }
+
+  if (error || !data) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-center gap-4 py-10 text-center">
+          <span className="grid size-12 place-items-center rounded-2xl bg-destructive/10 text-destructive">
+            <WifiOff className="size-5" />
+          </span>
+          <div>
+            <p className="font-medium">{error ?? "暂无监控数据"}</p>
+            <p className="mt-1 text-sm text-muted-foreground">确认后端服务可用后重新加载。</p>
+          </div>
+          <Button onClick={() => void load(true)} disabled={refreshing}>
+            <RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />
+            重新加载
+          </Button>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  const onlinePercent = data.summary.totalChannels
+    ? Math.round((data.summary.online / data.summary.totalChannels) * 100)
+    : 0
+  const deliveryTotal = data.channels.reduce((total, item) => total + item.delivery.total, 0)
+  const deliveryDelivered = data.channels.reduce((total, item) => total + item.delivery.delivered, 0)
+  const deliverySuccessPercent = deliveryTotal ? Math.round((deliveryDelivered / deliveryTotal) * 100) : 100
+
+  const summary = [
+    {
+      label: "转发渠道",
+      value: String(data.summary.totalChannels),
+      hint: `${data.summary.online} 个在线 · ${data.summary.disabled} 个禁用`,
+      percent: onlinePercent,
+    },
+    {
+      label: "业务应用",
+      value: String(data.apps.length),
+      hint: `${data.apps.filter((item) => item.health === "online").length} 个在线`,
+      percent: data.apps.length
+        ? Math.round((data.apps.filter((item) => item.health === "online").length / data.apps.length) * 100)
+        : 0,
+    },
+    {
+      label: "投递成功",
+      value: `${deliverySuccessPercent}%`,
+      hint: deliveryTotal ? `共 ${deliveryTotal} 条投递记录` : "暂无投递记录",
+      percent: deliverySuccessPercent,
+    },
+    {
+      label: "排队投递",
+      value: String(data.summary.queuedItems),
+      hint: data.summary.queuedItems > 0 ? "需要关注转发链路" : "当前队列为空",
+      percent: deliveryTotal ? Math.round((data.summary.queuedItems / deliveryTotal) * 100) : 0,
+    },
+  ]
+
   return (
     <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs text-muted-foreground">
+          采集时间：{formatTime(data.generatedAt)} · 每 30 秒自动刷新
+        </p>
+        <Button variant="outline" size="sm" onClick={() => void load(true)} disabled={refreshing}>
+          <RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />
+          刷新
+        </Button>
+      </div>
+
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {healthMetrics.map((item) => {
-          const Icon = item.icon
-
-          return (
-            <Card key={item.label}>
-              <CardContent className="flex items-center justify-between gap-3">
-                <span className="text-sm text-muted-foreground">{item.label}</span>
-                <span className="grid size-9 place-items-center rounded-xl bg-primary/10 text-primary">
-                  <Icon className="size-4" />
-                </span>
-              </CardContent>
-              <CardFooter className="flex-col items-start gap-2 pt-0">
-                <div className="text-3xl font-semibold tracking-[-0.03em]">{item.value}</div>
-                <div className="text-xs text-muted-foreground">{item.hint}</div>
-                <Progress value={item.valuePercent} className="mt-2" />
-              </CardFooter>
-            </Card>
-          )
-        })}
-      </section>
-
-      <section className="grid gap-4 xl:grid-cols-[1fr_1.4fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle>渠道吞吐</CardTitle>
-            <CardDescription>最近一次采集时间：1 分钟前</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-5">
-            {resources.map((item) => {
-              const Icon = item.icon
-
-              return (
-                <div key={item.label}>
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <span className="grid size-8 place-items-center rounded-lg bg-muted text-muted-foreground">
-                        <Icon className="size-4" />
-                      </span>
-                      <span className="text-sm font-medium">{item.label}</span>
-                    </div>
-                    <span className="font-mono text-sm">{item.display}</span>
-                  </div>
-                  <Progress value={item.value} className="mt-3" />
-                </div>
-              )
-            })}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>渠道链路</CardTitle>
-            <CardDescription>按渠道查看运行状态、投递延迟和可用性。</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-3">
-            {services.map((item) => (
-              <div
-                key={item.name}
-                className="flex flex-col gap-3 rounded-xl border p-4 md:flex-row md:items-center md:justify-between"
-              >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="font-medium">{item.name}</p>
-                    <Badge variant={serviceStatus[item.status].variant}>
-                      {serviceStatus[item.status].label}
-                    </Badge>
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">{item.detail}</p>
-                </div>
-                <div className="flex items-center gap-6 text-sm">
-                  <div>
-                    <p className="text-xs text-muted-foreground">延迟</p>
-                    <p className="mt-1 font-mono">{item.latency}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">可用性</p>
-                    <p className="mt-1 font-mono">{item.uptime}</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+        {summary.map((item) => (
+          <Card key={item.label}>
+            <CardContent className="text-sm text-muted-foreground">{item.label}</CardContent>
+            <CardFooter className="flex-col items-start gap-2 pt-0">
+              <div className="text-3xl font-semibold tracking-[-0.03em]">{item.value}</div>
+              <div className="text-xs text-muted-foreground">{item.hint}</div>
+              <Progress value={item.percent} className="mt-2" />
+            </CardFooter>
+          </Card>
+        ))}
       </section>
 
       <Card>
         <CardHeader>
-          <CardTitle>监控告警</CardTitle>
-          <CardDescription>展示当前需要关注或观察的风险。</CardDescription>
+          <CardTitle>转发渠道</CardTitle>
+          <CardDescription>展示渠道状态、最近测试时间和投递队列统计。</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3">
-          {alerts.map((item) => {
-            const style = alertStyle[item.level]
-            const Icon = style.icon
-
-            return (
-              <div key={item.title} className="flex items-start gap-3 rounded-xl border p-4">
-                <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-                  <Icon className="size-4" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-medium">{item.title}</p>
-                    <Badge variant={style.variant}>{style.label}</Badge>
+          {data.channels.map((item) => (
+            <div key={item.channelId} className="rounded-xl border p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium">{item.name}</p>
+                    <Badge variant={healthVariant(item.health)}>{healthLabels[item.health]}</Badge>
+                    <Badge variant="outline">{item.type}</Badge>
                   </div>
-                  <p className="mt-1 text-sm text-muted-foreground">{item.description}</p>
+                  <p className="mt-1 break-all text-xs text-muted-foreground">
+                    {item.channelId} · {item.endpoint || "未配置端点"}
+                  </p>
                 </div>
-                <span className="text-xs whitespace-nowrap text-muted-foreground">{item.time}</span>
+                <p className="text-xs whitespace-nowrap text-muted-foreground">
+                  最近测试：{formatTime(item.lastTestedAt)}
+                </p>
               </div>
-            )
-          })}
+              <div className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                <div><p className="text-xs text-muted-foreground">总数</p><p className="mt-1 font-mono">{item.delivery.total}</p></div>
+                <div><p className="text-xs text-muted-foreground">排队</p><p className="mt-1 font-mono">{item.delivery.queued}</p></div>
+                <div><p className="text-xs text-muted-foreground">已投递</p><p className="mt-1 font-mono">{item.delivery.delivered}</p></div>
+                <div><p className="text-xs text-muted-foreground">失败</p><p className="mt-1 font-mono">{item.delivery.failed}</p></div>
+              </div>
+            </div>
+          ))}
+          {data.channels.length === 0 ? (
+            <p className="rounded-xl border p-6 text-center text-sm text-muted-foreground">暂无转发渠道。</p>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>业务应用</CardTitle>
+          <CardDescription>基于应用状态、租约过期时间和最近心跳判断在线情况。</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3">
+          {data.apps.map((item) => (
+            <div key={item.appId} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="font-medium">{item.displayName}</p>
+                  <Badge variant={healthVariant(item.health)}>{healthLabels[item.health]}</Badge>
+                  {item.version ? <Badge variant="outline">{item.version}</Badge> : null}
+                </div>
+                <p className="mt-1 font-mono text-xs text-muted-foreground">{item.appId} · {item.serviceKey}</p>
+              </div>
+              <div className="text-right text-sm">
+                <p className="text-xs text-muted-foreground">最近心跳</p>
+                <p className="mt-1">{formatTime(item.lastHeartbeatAt)}</p>
+                <p className="mt-1 text-xs text-muted-foreground">会话 {item.conversationCount}</p>
+              </div>
+            </div>
+          ))}
+          {data.apps.length === 0 ? (
+            <p className="rounded-xl border p-6 text-center text-sm text-muted-foreground">暂无业务应用。</p>
+          ) : null}
         </CardContent>
       </Card>
     </div>

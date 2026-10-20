@@ -23,14 +23,6 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import {
   Field,
   FieldGroup,
   FieldLabel,
@@ -44,6 +36,15 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
+  SheetClose,
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
+import {
   Table,
   TableBody,
   TableCell,
@@ -52,8 +53,8 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { TablePagination } from "@/components/ui/table-pagination"
-import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { RichTextEditor } from "@/components/workspace/rich-text-editor"
 
 const statusFilters = ["全部", "已发布", "待审核", "草稿"] as const
 
@@ -91,7 +92,7 @@ export function KnowledgeView() {
     () =>
       activeDocs.filter((doc) => {
         const statusMatches = statusFilter === "全部" || doc.status === statusFilter
-        const keywordMatches = `${doc.title}${doc.answer}`
+        const keywordMatches = `${doc.title}${richTextToPlainText(doc.answer)}`
           .toLowerCase()
           .includes(keyword.trim().toLowerCase())
 
@@ -362,7 +363,7 @@ export function KnowledgeView() {
                           {doc.language}
                         </Badge>
                       </div>
-                      <p className="mt-1 truncate text-xs text-muted-foreground">{doc.answer}</p>
+                      <p className="mt-1 truncate text-xs text-muted-foreground">{richTextToPlainText(doc.answer)}</p>
                       <p className="mt-1 text-[10px] text-muted-foreground">生效：{doc.effectiveAt ?? "长期"}</p>
                     </TableCell>
                     <TableCell>
@@ -466,126 +467,133 @@ export function KnowledgeView() {
         </CardContent>
       </Card>
 
-      <Dialog open={Boolean(draft)} onOpenChange={(open) => !open && setDraft(null)}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle>{draft?.id ? "编辑文档" : "新增文档"}</DialogTitle>
-            <DialogDescription>当前知识库：{activeBase?.name ?? "未选择"}</DialogDescription>
-          </DialogHeader>
+      <Sheet open={Boolean(draft)} onOpenChange={(open) => !open && setDraft(null)}>
+        <SheetContent side="right" className="w-full data-[side=right]:sm:max-w-4xl">
+          <SheetHeader>
+            <SheetTitle>{draft?.id ? "编辑文档" : "新增文档"}</SheetTitle>
+            <SheetDescription>当前知识库：{activeBase?.name ?? "未选择"}</SheetDescription>
+          </SheetHeader>
 
-          <div className="-mx-4 no-scrollbar max-h-[50vh] overflow-y-auto px-4">
+          <div className="grid min-h-0 flex-1 auto-rows-min gap-6 overflow-y-auto px-4">
             {draft ? (
               <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="doc-title">标题</FieldLabel>
-                <Input
-                  id="doc-title"
-                  value={draft.title}
-                  onChange={(event) => setDraft({ ...draft, title: event.target.value })}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="doc-answer">答案 / 内容</FieldLabel>
-                <Textarea
-                  id="doc-answer"
-                  className="min-h-48 resize-none"
-                  value={draft.answer}
-                  onChange={(event) => setDraft({ ...draft, answer: event.target.value })}
-                />
-              </Field>
-
-              <div className="grid gap-3 sm:grid-cols-3">
                 <Field>
-                  <FieldLabel>类型</FieldLabel>
-                  <Select value={draft.type} onValueChange={(value) => setDraft({ ...draft, type: value as Draft["type"] })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {["FAQ", "政策", "规则", "模板"].map((option) => (
-                        <SelectItem key={option} value={option}>{option}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-
-                <Field>
-                  <FieldLabel>语言</FieldLabel>
-                  <Select value={draft.language} onValueChange={(value) => setDraft({ ...draft, language: value as Draft["language"] })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {["中文", "English", "Español"].map((option) => (
-                        <SelectItem key={option} value={option}>{option}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-
-                <Field>
-                  <FieldLabel>状态</FieldLabel>
-                  <Select value={draft.status} onValueChange={(value) => setDraft({ ...draft, status: value as Draft["status"] })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {["已发布", "待审核", "草稿"].map((option) => (
-                        <SelectItem key={option} value={option}>{option}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Field>
-                  <FieldLabel htmlFor="doc-channels">适用渠道</FieldLabel>
+                  <FieldLabel htmlFor="doc-title">标题</FieldLabel>
                   <Input
-                    id="doc-channels"
-                    value={(draft.channels ?? []).join(", ")}
-                    onChange={(event) =>
-                      setDraft({
-                        ...draft,
-                        channels: event.target.value
-                          .split(",")
-                          .map((item) => item.trim())
-                          .filter(Boolean),
-                      })
-                    }
-                    placeholder="WhatsApp, Telegram, Web Chat"
+                    id="doc-title"
+                    value={draft.title}
+                    onChange={(event) => setDraft({ ...draft, title: event.target.value })}
                   />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="doc-effective">生效时间</FieldLabel>
-                  <Input
-                    id="doc-effective"
-                    type="date"
-                    value={draft.effectiveAt ?? ""}
-                    onChange={(event) => setDraft({ ...draft, effectiveAt: event.target.value })}
+                  <FieldLabel>答案 / 内容</FieldLabel>
+                  <RichTextEditor
+                    key={`${draft.id ?? "new"}-${draft.title || "untitled"}`}
+                    value={draft.answer}
+                    onChange={(answer) => setDraft({ ...draft, answer })}
                   />
                 </Field>
-                <Field>
-                  <FieldLabel>知识来源</FieldLabel>
-                  <Select
-                    value={draft.source ?? "手动问答对"}
-                    onValueChange={(value) => setDraft({ ...draft, source: value })}
-                  >
-                    <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {["手动问答对", "文档上传", "网页抓取", "业务系统同步", "常用语导入", "历史会话沉淀"].map((option) => (
-                        <SelectItem key={option} value={option}>{option}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-              </div>
-            </FieldGroup>
+
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <Field>
+                    <FieldLabel>类型</FieldLabel>
+                    <Select value={draft.type} onValueChange={(value) => setDraft({ ...draft, type: value as Draft["type"] })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {["FAQ", "政策", "规则", "模板"].map((option) => (
+                          <SelectItem key={option} value={option}>{option}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+
+                  <Field>
+                    <FieldLabel>语言</FieldLabel>
+                    <Select value={draft.language} onValueChange={(value) => setDraft({ ...draft, language: value as Draft["language"] })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {["中文", "English", "Español"].map((option) => (
+                          <SelectItem key={option} value={option}>{option}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+
+                  <Field>
+                    <FieldLabel>状态</FieldLabel>
+                    <Select value={draft.status} onValueChange={(value) => setDraft({ ...draft, status: value as Draft["status"] })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {["已发布", "待审核", "草稿"].map((option) => (
+                          <SelectItem key={option} value={option}>{option}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field>
+                    <FieldLabel htmlFor="doc-channels">适用渠道</FieldLabel>
+                    <Input
+                      id="doc-channels"
+                      value={(draft.channels ?? []).join(", ")}
+                      onChange={(event) =>
+                        setDraft({
+                          ...draft,
+                          channels: event.target.value
+                            .split(",")
+                            .map((item) => item.trim())
+                            .filter(Boolean),
+                        })
+                      }
+                      placeholder="WhatsApp, Telegram, Web Chat"
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="doc-effective">生效时间</FieldLabel>
+                    <Input
+                      id="doc-effective"
+                      type="date"
+                      value={draft.effectiveAt ?? ""}
+                      onChange={(event) => setDraft({ ...draft, effectiveAt: event.target.value })}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel>知识来源</FieldLabel>
+                    <Select
+                      value={draft.source ?? "手动问答对"}
+                      onValueChange={(value) => setDraft({ ...draft, source: value })}
+                    >
+                      <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {["手动问答对", "文档上传", "网页抓取", "业务系统同步", "常用语导入", "历史会话沉淀"].map((option) => (
+                          <SelectItem key={option} value={option}>{option}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+              </FieldGroup>
             ) : null}
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDraft(null)}>
-              取消
-            </Button>
+          <SheetFooter className="flex-row justify-end gap-2">
+            <SheetClose asChild>
+              <Button variant="outline">取消</Button>
+            </SheetClose>
             <Button onClick={saveDoc}>保存</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
     </div>
   )
+}
+
+function richTextToPlainText(value: string) {
+  return value
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
 }

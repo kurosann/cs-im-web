@@ -164,6 +164,7 @@ function ReadPositionTracker({
 }) {
   const { visibleMessageIds } = useMessageScrollerVisibility()
   const readConversationIdRef = useRef<string | null>(null)
+  const lastReadPositionRef = useRef<{ conversationId: string; seq: number } | null>(null)
 
   useEffect(() => {
     if (!conversationId || visibleMessageIds.length === 0) return
@@ -176,8 +177,13 @@ function ReadPositionTracker({
       visibleMessageIdsSet.has(message.id) && message.seq > latest ? message.seq : latest
     ), 0)
     saveReadPosition(session.userId, conversationId, readSeq)
-    if (readSeq > 0 && readConversationIdRef.current !== conversationId) {
+    const lastReadPosition = lastReadPositionRef.current
+    if (readSeq > 0 && (
+      lastReadPosition?.conversationId !== conversationId ||
+      readSeq > lastReadPosition.seq
+    )) {
       readConversationIdRef.current = conversationId
+      lastReadPositionRef.current = { conversationId, seq: readSeq }
       onRead(conversationId)
     }
   }, [conversationId, messages, onRead, visibleMessageIds])
@@ -291,7 +297,7 @@ function ConversationList({
                   onClick={() => onSelect(conversation.conversationId)}
                   className={cn(
                     "w-full rounded-lg p-3 text-left transition-colors hover:bg-muted/60",
-                    active && "bg-muted"
+                    active && "bg-sidebar-border"
                   )}
                 >
                   <div className="flex items-start gap-3">

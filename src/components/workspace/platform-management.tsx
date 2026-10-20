@@ -65,6 +65,7 @@ import {
   createStaff,
   deleteChannelCredential,
   forceStaffLogout,
+  resetStaffPassword,
   listAuditLogs,
   listStaff,
   listRoles,
@@ -252,6 +253,7 @@ function TeamView() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [createdStaff, setCreatedStaff] = useState<{ email: string; password: string } | null>(null)
+  const [resetPassword, setResetPassword] = useState<{ email: string; password: string } | null>(null)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [roles, setRoles] = useState<Role[]>([])
 
@@ -354,6 +356,21 @@ function TeamView() {
       await forceStaffLogout(id)
       await loadEmployees()
       toast.success("员工会话已下线")
+    } catch (error) {
+      showError(error)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  async function resetPasswordFor(id: string) {
+    if (isSaving) return
+    setIsSaving(true)
+    try {
+      const result = await resetStaffPassword(id)
+      await loadEmployees()
+      setResetPassword({ email: result.user.email, password: result.initialPassword })
+      toast.success("员工密码已重置")
     } catch (error) {
       showError(error)
     } finally {
@@ -479,6 +496,12 @@ function TeamView() {
                               强制下线
                             </DropdownMenuItem>
                             <DropdownMenuItem
+                              disabled={isSaving}
+                              onClick={() => void resetPasswordFor(employee.id)}
+                            >
+                              重置密码
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
                               variant={employee.status === "active" ? "destructive" : "default"}
                               disabled={isSaving}
                               onClick={() => void toggleEmployee(employee.id, employee.status === "active" ? "disabled" : "active")}
@@ -529,6 +552,25 @@ function TeamView() {
             <Button variant="outline" onClick={() => setCreateOpen(false)}>取消</Button>
             <Button onClick={createEmployee}>创建</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(resetPassword)} onOpenChange={(open) => !open && setResetPassword(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>新密码只显示一次</DialogTitle>
+            <DialogDescription>旧密码已失效，请立即发给员工并提醒登录后修改。</DialogDescription>
+          </DialogHeader>
+          <div className="-mx-4 no-scrollbar max-h-[50vh] overflow-y-auto px-4 py-3">
+            <div className="space-y-3">
+              <div className="rounded-lg border bg-muted/40 p-3 text-sm">{resetPassword?.email}</div>
+              <div className="rounded-lg border bg-muted/40 p-3 font-mono text-xs break-all whitespace-pre-wrap">{resetPassword?.password}</div>
+              <Button variant="outline" onClick={async () => { await navigator.clipboard.writeText(resetPassword?.password ?? ""); toast.success("新密码已复制") }}>
+                <Copy className="size-4" />复制新密码
+              </Button>
+            </div>
+          </div>
+          <DialogFooter><Button onClick={() => setResetPassword(null)}>我已保存</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

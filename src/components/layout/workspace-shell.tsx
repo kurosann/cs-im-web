@@ -17,9 +17,9 @@ import {
   MessageSquareText,
   Settings2,
   ShieldCheck,
-  Sparkles,
   Webhook,
   UsersRound,
+  UserRound,
 } from "lucide-react"
 import { Collapsible as CollapsiblePrimitive } from "radix-ui"
 import Link from "next/link"
@@ -57,6 +57,7 @@ import {
   SidebarMenuSubItem,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
+import { Skeleton } from "@/components/ui/skeleton"
 import { TooltipProvider } from "@/components/ui/tooltip"
 
 type NavItem = {
@@ -73,7 +74,6 @@ type NavItem = {
 
 const workItems: NavItem[] = [
   { href: "/", label: "总览", icon: LayoutDashboard },
-  { href: "/v2", label: "V2 验收入口", icon: Sparkles },
 ]
 
 const platformItems: NavItem[] = [
@@ -92,7 +92,7 @@ const platformItems: NavItem[] = [
 ]
 
 const conversationItems: NavItem[] = [
-  { href: "/conversations", label: "会话", icon: MessageSquareText, alert: true },
+  { href: "/conversations", label: "会话", icon: MessageSquareText },
   { href: "/chat", label: "客服聊天", icon: Activity, alert: true },
 ]
 
@@ -118,36 +118,6 @@ const pageTitles: Record<string, { eyebrow: string; title: string; description: 
     title: "总览",
     description: "快速掌握当前服务状态和待处理工作。",
   },
-  "/v2": {
-    eyebrow: "V2 工作台",
-    title: "总览",
-    description: "V2 智能工作台入口，集中查看 AI 辅助、翻译和会话服务状态。",
-  },
-  "/v2/chat": {
-    eyebrow: "V2 会话服务",
-    title: "聊天室",
-    description: "AI 建议填充、自动翻译、会话摘要、风险识别和上下文协作。",
-  },
-  "/v2/employee": {
-    eyebrow: "V2 AI 配置",
-    title: "AI 客服员工",
-    description: "配置 AI 员工的基础模式、专业模式、账号绑定和发布状态。",
-  },
-  "/v2/knowledge": {
-    eyebrow: "V2 AI 配置",
-    title: "知识库",
-    description: "维护 FAQ、政策、规则、多语言答案和命中统计。",
-  },
-  "/v2/assign": {
-    eyebrow: "V2 流程控制",
-    title: "智能分配",
-    description: "按技能、语言、负载和风险把会话分配给 AI 或人工坐席。",
-  },
-  "/v2/reminders": {
-    eyebrow: "V2 流程控制",
-    title: "基础提醒",
-    description: "集中处理超时、失败、高风险和转人工提醒。",
-  },
   "/conversations": {
     eyebrow: "客服工作",
     title: "会话",
@@ -164,12 +134,12 @@ const pageTitles: Record<string, { eyebrow: string; title: string; description: 
     description: "统一查看智能接待、人工协作和知识服务状态。",
   },
   "/employee": {
-    eyebrow: "AI 配置",
+    eyebrow: "AI",
     title: "AI 客服员工",
     description: "配置 AI 员工的人设、知识范围和自动回复策略。",
   },
   "/knowledge": {
-    eyebrow: "AI 配置",
+    eyebrow: "AI",
     title: "知识库",
     description: "维护 FAQ、政策、规则和多语言答案。",
   },
@@ -223,10 +193,15 @@ const pageTitles: Record<string, { eyebrow: string; title: string; description: 
     title: "设置",
     description: "管理工作区信息、会话偏好和角色权限。",
   },
+  "/profile": {
+    eyebrow: "个人信息",
+    title: "个人信息",
+    description: "查看账号信息、维护头像占位和修改登录密码。",
+  },
 }
 
 function isNavItemActive(href: string, pathname: string) {
-  if (href === "/" || href === "/v2") {
+  if (href === "/") {
     return pathname === href
   }
 
@@ -263,7 +238,11 @@ function NavGroup({
                 >
                   <SidebarMenuItem>
                     <CollapsiblePrimitive.Trigger asChild>
-                      <SidebarMenuButton isActive={isChildActive} tooltip={item.label}>
+                      <SidebarMenuButton
+                        isActive={isChildActive}
+                        className={isChildActive ? "after:hidden" : undefined}
+                        tooltip={item.label}
+                      >
                         <Icon className="size-4" strokeWidth={2.2} />
                         <span>{item.label}</span>
                         <ChevronRight className="ml-auto size-4 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
@@ -298,7 +277,7 @@ function NavGroup({
                 {item.alert && (counts?.[item.href] ?? 0) > 0 ? (
                   <SidebarMenuBadge
                     aria-label={`未读 ${counts?.[item.href]} 条`}
-                    className="min-w-5 rounded-full bg-destructive px-1.5 py-0 text-[10px] font-semibold text-white"
+                    className="min-w-5 rounded-full bg-destructive px-1.5 py-0 text-[10px] font-semibold text-white!"
                   >
                     {counts?.[item.href] ?? 0}
                   </SidebarMenuBadge>
@@ -391,7 +370,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
           <SidebarContent>
             <NavGroup label="工作台" items={workItems} pathname={pathname} />
             <NavGroup label="客户服务" items={conversationItems} pathname={pathname} counts={menuCounts} />
-            <NavGroup label="AI 配置" items={aiItems} pathname={pathname} />
+            <NavGroup label="AI" items={aiItems} pathname={pathname} />
             <NavGroup label="流程工作" items={flowItems} pathname={pathname} />
             <NavGroup label="平台管理" items={platformItems} pathname={pathname} />
             <NavGroup label="系统设置" items={systemItems} pathname={pathname} />
@@ -402,19 +381,23 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
               <SidebarMenuItem>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <SidebarMenuButton size="lg" tooltip={session?.displayName ?? "客服专员"}>
+                    <SidebarMenuButton size="lg" tooltip={session?.displayName ?? "加载中..."}>
                       <Avatar>
                         <AvatarFallback>
-                          {session?.displayName.slice(0, 1) ?? "客"}
+                          {session ? session.displayName.slice(0, 1) : <Skeleton className="size-4 rounded-full" />}
                         </AvatarFallback>
                       </Avatar>
                       <span className="grid min-w-0 flex-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
-                        <span className="truncate text-sm font-semibold">
-                          {session?.displayName ?? "客服专员"}
-                        </span>
-                        <span className="truncate text-xs text-sidebar-foreground/60">
-                          {session?.email ?? "member@example.com"}
-                        </span>
+                        {session ? (
+                          <span className="truncate text-sm font-semibold">{session.displayName}</span>
+                        ) : (
+                          <Skeleton className="h-4 w-20" />
+                        )}
+                        {session ? (
+                          <span className="truncate text-xs text-sidebar-foreground/60">{session.email}</span>
+                        ) : (
+                          <Skeleton className="h-3 w-28" />
+                        )}
                       </span>
                       <ChevronsUpDown className="ml-auto size-4 text-sidebar-foreground/60" />
                     </SidebarMenuButton>
@@ -429,20 +412,28 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
                       <div className="flex items-center gap-2 px-2 py-1.5">
                         <Avatar>
                           <AvatarFallback>
-                            {session?.displayName.slice(0, 1) ?? "客"}
+                            {session ? session.displayName.slice(0, 1) : <Skeleton className="size-4 rounded-full" />}
                           </AvatarFallback>
                         </Avatar>
                         <div className="grid min-w-0 flex-1 leading-tight">
-                          <span className="truncate text-sm font-medium">
-                            {session?.displayName ?? "客服专员"}
-                          </span>
-                          <span className="truncate text-xs text-muted-foreground">
-                            {session?.email ?? "member@example.com"}
-                          </span>
+                          {session ? (
+                            <span className="truncate text-sm font-medium">{session.displayName}</span>
+                          ) : (
+                            <Skeleton className="h-4 w-20" />
+                          )}
+                          {session ? (
+                            <span className="truncate text-xs text-muted-foreground">{session.email}</span>
+                          ) : (
+                            <Skeleton className="h-3 w-28" />
+                          )}
                         </div>
                       </div>
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => router.push("/profile")}>
+                      <UserRound className="size-4" />
+                      个人信息
+                    </DropdownMenuItem>
                     <DropdownMenuItem onClick={handleLogout}>
                       <LogOut className="size-4" />
                       退出登录

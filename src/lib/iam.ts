@@ -69,6 +69,51 @@ export type AuditLogPage = {
   total: number
 }
 
+export type ChannelDeliveryStats = {
+  total: number
+  queued: number
+  delivered: number
+  failed: number
+  lastEventAt?: string | null
+}
+
+export type ChannelMonitorChannel = {
+  channelId: string
+  name: string
+  type: string
+  endpoint?: string
+  status: string
+  health: "online" | "warning" | "offline" | "disabled"
+  lastTestedAt?: string | null
+  delivery: ChannelDeliveryStats
+}
+
+export type ChannelMonitorApp = {
+  appId: string
+  displayName: string
+  serviceKey: string
+  kind?: string
+  version?: string
+  status: string
+  health: "online" | "offline" | "disabled"
+  lastHeartbeatAt?: string | null
+  leaseExpiresAt?: string | null
+  conversationCount: number
+}
+
+export type ChannelMonitorResult = {
+  generatedAt: string
+  summary: {
+    totalChannels: number
+    online: number
+    offline: number
+    disabled: number
+    queuedItems: number
+  }
+  channels: ChannelMonitorChannel[]
+  apps: ChannelMonitorApp[]
+}
+
 type ApiEnvelope<T> = {
   code: string
   message?: string
@@ -198,6 +243,10 @@ export function forceStaffLogout(userKey: string) {
   return request<string>(`/admin/v1/iam/staff/${userKey}/logout`, { method: "POST" })
 }
 
+export function resetStaffPassword(userKey: string) {
+  return request<CreatedStaff>(`/admin/v1/iam/staff/${userKey}/password/reset`, { method: "POST" })
+}
+
 export function listRoles() {
   return request<Role[]>("/admin/v1/iam/roles")
 }
@@ -234,4 +283,8 @@ export function listAuditLogs(input: {
   if (input.page) params.set("page", String(input.page))
   if (input.pageSize) params.set("pageSize", String(input.pageSize))
   return request<AuditLogPage>(`/admin/v1/iam/audit-logs?${params.toString()}`)
+}
+
+export function listChannelMonitor() {
+  return request<ChannelMonitorResult>("/admin/v1/channel-monitor")
 }

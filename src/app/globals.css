@@ -145,6 +145,101 @@
   animation: height-expand 200ms ease-out;
 }
 
+@layer components {
+  .typeset-docs {
+    --typeset-font-body: var(--font-sans);
+    --typeset-font-heading: var(--font-heading);
+    --typeset-font-mono: var(--font-mono);
+    --typeset-size: 0.875rem;
+    --typeset-leading: 1.7;
+    --typeset-flow: 0.75rem;
+
+    color: var(--color-foreground);
+    font-family: var(--typeset-font-body);
+    font-size: var(--typeset-size);
+    line-height: var(--typeset-leading);
+  }
+
+  .typeset-docs :where(p) {
+    margin-block: 0 var(--typeset-flow);
+  }
+
+  .typeset-docs :where(h1, h2) {
+    color: var(--color-foreground);
+    font-family: var(--typeset-font-heading);
+    font-weight: 600;
+    line-height: 1.35;
+    margin-block: 1.35em 0.65em;
+  }
+
+  .typeset-docs :where(h1) {
+    font-size: 1.375rem;
+    letter-spacing: -0.02em;
+  }
+
+  .typeset-docs :where(h2) {
+    font-size: 1.125rem;
+    letter-spacing: -0.01em;
+  }
+
+  .typeset-docs :where(h1:first-child, h2:first-child, p:first-child) {
+    margin-block-start: 0;
+  }
+
+  .typeset-docs :where(ul, ol) {
+    margin-block: 0 var(--typeset-flow);
+    padding-inline-start: 1.4em;
+  }
+
+  .typeset-docs :where(ul) {
+    list-style: disc;
+  }
+
+  .typeset-docs :where(ol) {
+    list-style: decimal;
+  }
+
+  .typeset-docs :where(li) {
+    margin-block: 0.25em;
+    padding-inline-start: 0.1em;
+  }
+
+  .typeset-docs :where(li > p) {
+    margin-block: 0;
+  }
+
+  .typeset-docs :where(blockquote) {
+    border-inline-start: 3px solid var(--color-border);
+    color: var(--color-muted-foreground);
+    margin-block: 0 var(--typeset-flow);
+    padding-inline: 0.9em;
+  }
+
+  .typeset-docs :where(strong) {
+    font-weight: 650;
+  }
+
+  .typeset-docs :where(code) {
+    background: var(--color-muted);
+    border-radius: 0.35rem;
+    font-family: var(--typeset-font-mono);
+    font-size: 0.8125rem;
+    padding: 0.1em 0.35em;
+  }
+
+  .typeset-docs :where(pre) {
+    background: var(--color-muted);
+    border-radius: 0.5rem;
+    overflow-x: auto;
+    padding: 0.75rem 0.9rem;
+  }
+
+  .typeset-docs :where(pre code) {
+    background: transparent;
+    padding: 0;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

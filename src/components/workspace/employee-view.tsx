@@ -128,7 +128,7 @@ const initialEmployees: Employee[] = [
     safetyRules: "禁止承诺赔付；禁止承诺具体到货时间；不透露内部系统信息。",
     selectedDocIds: ["d1", "d2"],
     tools: ["查询商品"],
-    version: "v1.4",
+    version: "1.4.0",
     updatedAt: "今天 10:20",
   },
   {
@@ -151,7 +151,7 @@ const initialEmployees: Employee[] = [
     safetyRules: "高风险会话禁止自动回复；禁止承诺赔付；转人工时附带摘要、命中知识和风险等级。",
     selectedDocIds: ["d3", "d4"],
     tools: ["查询订单", "查询物流"],
-    version: "v2.1",
+    version: "2.1.0",
     updatedAt: "今天 09:48",
   },
   {
@@ -174,7 +174,7 @@ const initialEmployees: Employee[] = [
     safetyRules: "账号安全、支付异常、法律风险必须转人工；翻译失败时不自动发送。",
     selectedDocIds: ["d7", "d8"],
     tools: ["自动翻译", "查询订单"],
-    version: "v1.0",
+    version: "1.0.0",
     updatedAt: "昨天 18:12",
   },
 ]
@@ -239,7 +239,7 @@ export function EmployeeView() {
       name: "新 AI 客服员工",
       status: "未配置",
       isDefault: false,
-      version: "v0.1",
+      version: "0.1.0",
       updatedAt: "刚刚",
     }
     setEmployees((current) => [...current, created])
@@ -255,7 +255,7 @@ export function EmployeeView() {
       name: `${active.name} 副本`,
       status: "已暂停",
       isDefault: false,
-      version: "v0.1",
+      version: "0.1.0",
       updatedAt: "刚刚",
     }
     setEmployees((current) => [...current, copy])
