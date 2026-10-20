@@ -18,6 +18,7 @@ import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
@@ -56,7 +57,12 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
 const statusFilters = ["全部", "已发布", "待审核", "草稿"] as const
 
-type Draft = Pick<KnowledgeDoc, "title" | "answer" | "type" | "language" | "status"> & { id?: string }
+type Draft = Pick<KnowledgeDoc, "title" | "answer" | "type" | "language" | "status"> & {
+  id?: string
+  channels?: string[]
+  effectiveAt?: string
+  source?: string
+}
 
 export function KnowledgeView() {
   const [groups, setGroups] = useState<KnowledgeGroup[]>(initialGroups)
@@ -155,14 +161,33 @@ export function KnowledgeView() {
 
   return (
     <div className="grid min-h-[calc(100vh-142px)] gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+      <section className="grid gap-3 sm:grid-cols-2 xl:col-span-2 xl:grid-cols-4">
+        {[
+          { label: "知识条目", value: String(docs.length), hint: "覆盖 FAQ、政策、规则和模板" },
+          { label: "已发布", value: String(docs.filter((doc) => doc.status === "已发布").length), hint: "可被 AI 检索" },
+          { label: "近 7 天命中", value: "82%", hint: "命中后继续追问率 14%" },
+          { label: "多语言答案", value: "3", hint: "中文 / English / Español" },
+        ].map((item) => (
+          <Card key={item.label}>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">{item.label}</p>
+            </CardContent>
+            <CardFooter className="flex-col items-start gap-1 pt-0">
+              <p className="text-2xl font-semibold">{item.value}</p>
+              <p className="text-xs text-muted-foreground">{item.hint}</p>
+            </CardFooter>
+          </Card>
+        ))}
+      </section>
+
       <Card className="h-fit">
-        <CardHeader className="flex-row items-start gap-3">
+        <CardHeader className="flex items-start gap-3">
           <span className="grid size-9 place-items-center rounded-xl bg-primary/10 text-primary">
             <LibraryBig className="size-4" />
           </span>
           <div>
             <CardTitle className="text-sm">知识库树</CardTitle>
-            <CardDescription>按分组管理知识库。</CardDescription>
+            <CardDescription>第一级是分组，第二级是知识库。</CardDescription>
           </div>
         </CardHeader>
 
@@ -255,7 +280,7 @@ export function KnowledgeView() {
       </Card>
 
       <Card className="min-w-0">
-        <CardHeader className="flex-row flex-wrap items-start justify-between gap-3">
+        <CardHeader className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <CardTitle className="text-lg">{activeBase ? activeBase.name : activeGroup.name}</CardTitle>
             <CardDescription>
@@ -270,7 +295,7 @@ export function KnowledgeView() {
             <Button
               size="sm"
               disabled={!activeBase}
-              onClick={() => setDraft({ title: "", answer: "", type: "FAQ", language: "中文", status: "草稿" })}
+              onClick={() => setDraft({ title: "", answer: "", type: "FAQ", language: "中文", status: "草稿", channels: ["WhatsApp", "Web Chat"], effectiveAt: "2026-10-20", source: "手动问答对" })}
             >
               <Plus className="size-3.5" />
               新增文档
@@ -313,12 +338,12 @@ export function KnowledgeView() {
           </div>
 
           <div className="overflow-x-auto rounded-xl border border-border">
-            <Table className="min-w-[720px]">
+            <Table className="min-w-[760px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>标题 / 答案</TableHead>
                   <TableHead>类型</TableHead>
-                  <TableHead>语言</TableHead>
+                  <TableHead>渠道</TableHead>
                   <TableHead>状态</TableHead>
                   <TableHead className="text-right">命中</TableHead>
                   <TableHead className="text-right">操作</TableHead>
@@ -328,13 +353,31 @@ export function KnowledgeView() {
                 {pagedDocs.map((doc) => (
                   <TableRow key={doc.id}>
                     <TableCell className="max-w-[360px]">
-                      <p className="truncate font-medium">{doc.title}</p>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <p className="truncate font-medium">{doc.title}</p>
+                        <Badge variant="secondary" className="shrink-0 text-[10px]">
+                          {doc.source ?? "手动问答对"}
+                        </Badge>
+                        <Badge variant="outline" className="shrink-0 text-[10px]">
+                          {doc.language}
+                        </Badge>
+                      </div>
                       <p className="mt-1 truncate text-xs text-muted-foreground">{doc.answer}</p>
+                      <p className="mt-1 text-[10px] text-muted-foreground">生效：{doc.effectiveAt ?? "长期"}</p>
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline">{doc.type}</Badge>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{doc.language}</TableCell>
+                    <TableCell>
+                      <div className="flex max-w-[180px] flex-wrap gap-1">
+                        {(doc.channels ?? ["Web Chat"]).slice(0, 2).map((channel) => (
+                          <Badge key={channel} variant="outline" className="text-[10px]">{channel}</Badge>
+                        ))}
+                        {(doc.channels?.length ?? 0) > 2 ? (
+                          <Badge variant="secondary" className="text-[10px]">+{(doc.channels?.length ?? 0) - 2}</Badge>
+                        ) : null}
+                      </div>
+                    </TableCell>
                     <TableCell>
                       <Badge variant={doc.status === "已发布" ? "secondary" : doc.status === "待审核" ? "outline" : "ghost"}>
                         {doc.status}
@@ -354,6 +397,9 @@ export function KnowledgeView() {
                               type: doc.type,
                               language: doc.language,
                               status: doc.status,
+                              channels: doc.channels,
+                              effectiveAt: doc.effectiveAt,
+                              source: doc.source,
                             })
                           }
                         >
@@ -386,6 +432,23 @@ export function KnowledgeView() {
                 这个知识库里没有匹配文档。
               </div>
             ) : null}
+          </div>
+
+          <div className="rounded-xl border border-dashed p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-semibold">术语保护</p>
+              <Badge variant="outline" className="text-[10px]">翻译时优先保留原文</Badge>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {["订单号", "品牌名", "链接", "金额", "日期", "型号"].map((term) => (
+                <Badge key={term} variant="secondary" className="text-[10px]">
+                  {term} · 原文保留
+                </Badge>
+              ))}
+            </div>
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">
+              翻译命中术语库时不会被改写；无法安全翻译的内容会提示客服仅发送原文。
+            </p>
           </div>
 
           <TablePagination
@@ -462,6 +525,49 @@ export function KnowledgeView() {
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {["已发布", "待审核", "草稿"].map((option) => (
+                        <SelectItem key={option} value={option}>{option}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field>
+                  <FieldLabel htmlFor="doc-channels">适用渠道</FieldLabel>
+                  <Input
+                    id="doc-channels"
+                    value={(draft.channels ?? []).join(", ")}
+                    onChange={(event) =>
+                      setDraft({
+                        ...draft,
+                        channels: event.target.value
+                          .split(",")
+                          .map((item) => item.trim())
+                          .filter(Boolean),
+                      })
+                    }
+                    placeholder="WhatsApp, Telegram, Web Chat"
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="doc-effective">生效时间</FieldLabel>
+                  <Input
+                    id="doc-effective"
+                    type="date"
+                    value={draft.effectiveAt ?? ""}
+                    onChange={(event) => setDraft({ ...draft, effectiveAt: event.target.value })}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel>知识来源</FieldLabel>
+                  <Select
+                    value={draft.source ?? "手动问答对"}
+                    onValueChange={(value) => setDraft({ ...draft, source: value })}
+                  >
+                    <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {["手动问答对", "文档上传", "网页抓取", "业务系统同步", "常用语导入", "历史会话沉淀"].map((option) => (
                         <SelectItem key={option} value={option}>{option}</SelectItem>
                       ))}
                     </SelectContent>

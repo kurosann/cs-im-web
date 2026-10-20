@@ -15,6 +15,7 @@ import {
   MessageSquareText,
   Settings2,
   ShieldCheck,
+  Sparkles,
   Webhook,
   UsersRound,
 } from "lucide-react"
@@ -61,6 +62,7 @@ type NavItem = {
 
 const workItems: NavItem[] = [
   { href: "/", label: "总览", icon: LayoutDashboard },
+  { href: "/v2", label: "V2 验收入口", icon: Sparkles },
 ]
 
 const platformItems: NavItem[] = [
@@ -103,6 +105,36 @@ const pageTitles: Record<string, { eyebrow: string; title: string; description: 
     eyebrow: "工作台",
     title: "总览",
     description: "快速掌握当前服务状态和待处理工作。",
+  },
+  "/v2": {
+    eyebrow: "V2 工作台",
+    title: "总览",
+    description: "V2 智能工作台入口，集中查看 AI 辅助、翻译和会话服务状态。",
+  },
+  "/v2/chat": {
+    eyebrow: "V2 会话服务",
+    title: "聊天室",
+    description: "AI 建议填充、自动翻译、会话摘要、风险识别和上下文协作。",
+  },
+  "/v2/employee": {
+    eyebrow: "V2 AI 配置",
+    title: "AI 客服员工",
+    description: "配置 AI 员工的基础模式、专业模式、账号绑定和发布状态。",
+  },
+  "/v2/knowledge": {
+    eyebrow: "V2 AI 配置",
+    title: "知识库",
+    description: "维护 FAQ、政策、规则、多语言答案和命中统计。",
+  },
+  "/v2/assign": {
+    eyebrow: "V2 流程控制",
+    title: "智能分配",
+    description: "按技能、语言、负载和风险把会话分配给 AI 或人工坐席。",
+  },
+  "/v2/reminders": {
+    eyebrow: "V2 流程控制",
+    title: "基础提醒",
+    description: "集中处理超时、失败、高风险和转人工提醒。",
   },
   "/conversations": {
     eyebrow: "客服工作",
@@ -177,8 +209,8 @@ const pageTitles: Record<string, { eyebrow: string; title: string; description: 
 }
 
 function isNavItemActive(href: string, pathname: string) {
-  if (href === "/") {
-    return pathname === "/"
+  if (href === "/" || href === "/v2") {
+    return pathname === href
   }
 
   return pathname.startsWith(href)

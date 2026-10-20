@@ -245,6 +245,12 @@ export function LoginForm() {
                       {isSubmitting ? "正在进入工作台..." : "进入工作台"}
                       <ArrowRight data-icon="inline-end" className="size-4" />
                     </Button>
+
+                    {process.env.NODE_ENV !== "production" ? (
+                      <Button type="button" variant="outline" className="h-11 w-full" asChild>
+                        <Link href="/preview">开发预览：直接进入 V2 工作台</Link>
+                      </Button>
+                    ) : null}
                   </FieldGroup>
                 </form>
               </CardContent>

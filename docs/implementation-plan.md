@@ -1,5 +1,7 @@
 # CS IM Web V1 实施方案
 
+> V2b 的增量实现与验收说明见 `docs/v2b-implementation.md`。
+
 日期：2026-10-18
 适用仓库：`cs-im-web`
 

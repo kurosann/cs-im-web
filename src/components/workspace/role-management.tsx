@@ -109,11 +109,23 @@ const permissionGroups: PermissionGroup[] = [
     ],
   },
   {
+    id: "customer",
+    title: "客户数据",
+    permissions: [
+      { id: "customer:profile:read", label: "查看客户信息", description: "查看客户基础资料、标签和历史会话。" },
+      { id: "customer:order:read", label: "查看订单", description: "查看会话关联的订单和业务状态。" },
+      { id: "conversation:note:read", label: "查看内部备注", description: "查看仅内部可见的备注和评论。" },
+      { id: "data:export", label: "导出数据", description: "导出会话、客户和统计报表。" },
+    ],
+  },
+  {
     id: "ai",
     title: "AI 配置",
     permissions: [
       { id: "ai:employee:manage", label: "管理 AI 员工", description: "配置 AI 员工、知识库和策略。" },
+      { id: "ai:employee:publish", label: "发布 AI 客服员工配置", description: "将草稿测试并发布到指定渠道。" },
       { id: "ai:knowledge:manage", label: "管理知识库", description: "维护 FAQ、政策和答案。" },
+      { id: "translation:configure", label: "配置翻译", description: "配置默认语言、术语库和渠道语言限制。" },
     ],
   },
   {
