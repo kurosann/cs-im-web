@@ -122,8 +122,8 @@ const permissionGroups: PermissionGroup[] = [
     id: "ai",
     title: "AI 配置",
     permissions: [
-      { id: "ai:employee:manage", label: "管理 AI 员工", description: "配置 AI 员工、知识库和策略。" },
-      { id: "ai:employee:publish", label: "发布 AI 客服员工配置", description: "将草稿测试并发布到指定渠道。" },
+      { id: "ai:employee:manage", label: "管理 AI 客服", description: "配置 AI 客服、知识库和策略。" },
+      { id: "ai:employee:publish", label: "保存并启动 AI 客服", description: "将草稿测试并启动到指定渠道。" },
       { id: "ai:knowledge:manage", label: "管理知识库", description: "维护 FAQ、政策和答案。" },
       { id: "translation:configure", label: "配置翻译", description: "配置默认语言、术语库和渠道语言限制。" },
     ],

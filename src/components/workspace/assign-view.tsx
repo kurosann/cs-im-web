@@ -60,7 +60,7 @@ const initialRules: Rule[] = [
   { id: "1", name: "高风险客户优先人工", condition: "风险等级 = 高 或 客户等级 = 黑卡", target: "售后二组 · 陈晓", targetType: "human", priority: 1, enabled: true },
   { id: "2", name: "西语客户分配", condition: "客户语言 = Español", target: "Lucía / Sofía（支持自动翻译兜底）", targetType: "human", priority: 2, enabled: true },
   { id: "3", name: "退款问题分配", condition: "意图包含退款或退货", target: "售后专员组", targetType: "team", priority: 3, enabled: true },
-  { id: "4", name: "普通售前", condition: "默认兜底规则", target: "AI 客服员工 · 售前助手", targetType: "ai", priority: 4, enabled: false },
+  { id: "4", name: "普通售前", condition: "默认兜底规则", target: "AI 客服 · 售前助手", targetType: "ai", priority: 4, enabled: false },
 ]
 
 const providers: ServiceProvider[] = [

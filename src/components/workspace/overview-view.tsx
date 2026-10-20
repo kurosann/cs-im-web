@@ -20,7 +20,7 @@ const metrics = [
 ]
 
 const scenarios = [
-  { href: "/employee", title: "配置 AI 客服员工", description: "设置人设、自动回复、知识范围和工具权限。", action: "去配置" },
+  { href: "/employee", title: "配置 AI 客服", description: "设置人设、自动回复、知识范围和工具权限。", action: "去配置" },
   { href: "/knowledge", title: "维护知识库", description: "维护 FAQ、政策、规则和多语言答案。", action: "去维护" },
   { href: "/reminders", title: "处理基础提醒", description: "集中处理超时、失败和转人工提醒。", action: "查看提醒" },
 ]
@@ -42,11 +42,11 @@ export function OverviewView() {
               让人工更省力，让 AI 接得住重复问题
             </h2>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-              将 AI 客服员工、知识库、智能分配和人工协作放在同一套工作流中，帮助团队更快响应每一条客户消息。
+              将 AI 客服、知识库、智能分配和人工协作放在同一套工作流中，帮助团队更快响应每一条客户消息。
             </p>
             <Button asChild className="mt-5">
               <Link href="/employee">
-                配置 AI 客服员工
+                配置 AI 客服
                 <ArrowRight data-icon="inline-end" className="size-4" />
               </Link>
             </Button>

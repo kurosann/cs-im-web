@@ -2,33 +2,35 @@
 
 import {
   Bot,
-  Check,
   CircleAlert,
   Copy,
+  Ellipsis,
   FlaskConical,
-  History,
+  Library,
   Pause,
   Play,
   Save,
-  Settings2,
-  ShieldCheck,
   Star,
   Trash2,
 } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { knowledgeBases, knowledgeDocs, knowledgeGroups } from "@/data/mock/chat"
+import { EmployeeExecutionLogs } from "@/components/workspace/employee-execution-logs"
+import {
+  createEmployee as createEmployeeRequest,
+  deleteEmployee as deleteEmployeeRequest,
+  listEmployeeChannels,
+  listEmployeeExecutions,
+  listEmployees,
+  updateEmployee,
+  type AIEmployee,
+  type ChannelBinding,
+} from "@/lib/ai-employees"
+import type { EmployeeExecution } from "@/lib/ai-execution-display"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -37,6 +39,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Field,
   FieldDescription,
@@ -52,14 +61,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
 type Mode = "basic" | "professional"
+type DetailPanel = "config" | "logs"
 type EmployeeStatus = "未配置" | "已暂停" | "运行中"
-type ReplyMode = "suggest" | "semi_auto" | "full_auto"
-
 type Employee = {
   id: string
   name: string
@@ -70,218 +78,415 @@ type Employee = {
   history: number
   autoReply: boolean
   reporting: boolean
-  replyMode: ReplyMode
-  accountScope: "all" | "selected"
-  accounts: string[]
-  businessScope: string
+  channelScope: "all" | "selected"
+  channels: string[]
   isDefault: boolean
-  confidenceThreshold: number
-  maxAutoTurns: number
-  safetyRules: string
   selectedDocIds: string[]
   tools: string[]
   version: string
   updatedAt: string
 }
 
-const accountOptions = [
-  { id: "WhatsApp · 售前 01", status: "在线", owner: "售前助手" },
-  { id: "WhatsApp · 售后 02", status: "在线", owner: "售后专员" },
-  { id: "WhatsApp · Global", status: "离线", owner: "未占用" },
-  { id: "Telegram · 售后 Bot", status: "在线", owner: "售后专员" },
-  { id: "Web Chat · 官网", status: "在线", owner: "售前助手" },
-  { id: "Messenger · 品牌主页", status: "在线", owner: "未占用" },
-]
-
 const toolOptions = ["查询商品", "查询订单", "查询物流", "查询会员权益", "自动翻译", "创建提醒"]
 
-const replyModeLabels: Record<ReplyMode, string> = {
-  suggest: "仅建议",
-  semi_auto: "半自动",
-  full_auto: "全自动",
+type ChannelOption = ChannelBinding
+
+const statusTone: Record<EmployeeStatus, string> = {
+  运行中: "bg-emerald-500",
+  已暂停: "bg-amber-500",
+  未配置: "bg-muted-foreground/50",
 }
 
-const statusVariant: Record<EmployeeStatus, "secondary" | "outline" | "ghost"> = {
-  运行中: "secondary",
-  已暂停: "outline",
-  未配置: "ghost",
-}
-
-const initialEmployees: Employee[] = [
-  {
-    id: "1",
-    name: "售前助手",
-    persona: "热情简洁，擅长商品和活动介绍",
-    status: "运行中",
+function blankEmployee(): Omit<Employee, "id" | "name" | "status"> {
+  return {
+    persona: "",
     mode: "basic",
-    prompt: "你是电商售前客服，用简洁中文回答商品、价格和优惠问题。不承诺库存和具体到货时间。",
+    prompt: "",
     history: 10,
     autoReply: true,
     reporting: true,
-    replyMode: "semi_auto",
-    accountScope: "all",
-    accounts: ["WhatsApp · 售前 01", "Web Chat · 官网"],
-    businessScope: "售前咨询 / 商品活动",
-    isDefault: true,
-    confidenceThreshold: 0.78,
-    maxAutoTurns: 5,
-    safetyRules: "禁止承诺赔付；禁止承诺具体到货时间；不透露内部系统信息。",
-    selectedDocIds: ["d1", "d2"],
-    tools: ["查询商品"],
-    version: "1.4.0",
-    updatedAt: "今天 10:20",
-  },
-  {
-    id: "2",
-    name: "售后专员",
-    persona: "耐心安抚，严格遵守售后规则",
-    status: "运行中",
-    mode: "professional",
-    prompt: "你是售后客服，只回答退款、退货和物流问题。涉及大额退款、投诉升级时立即转人工。",
-    history: 15,
-    autoReply: true,
-    reporting: true,
-    replyMode: "suggest",
-    accountScope: "selected",
-    accounts: ["WhatsApp · 售后 02", "Telegram · 售后 Bot"],
-    businessScope: "退款 / 退货 / 物流",
+    channelScope: "selected",
+    channels: [],
     isDefault: false,
-    confidenceThreshold: 0.82,
-    maxAutoTurns: 3,
-    safetyRules: "高风险会话禁止自动回复；禁止承诺赔付；转人工时附带摘要、命中知识和风险等级。",
-    selectedDocIds: ["d3", "d4"],
-    tools: ["查询订单", "查询物流"],
-    version: "2.1.0",
-    updatedAt: "今天 09:48",
-  },
-  {
-    id: "3",
-    name: "海外客服",
-    persona: "正式礼貌，支持英西双语",
-    status: "已暂停",
-    mode: "professional",
-    prompt: "Answer in the customer's language. Keep replies short and professional. Escalate account security issues.",
-    history: 12,
-    autoReply: false,
-    reporting: true,
-    replyMode: "full_auto",
-    accountScope: "selected",
-    accounts: ["WhatsApp · Global"],
-    businessScope: "海外售后 / English / Español",
-    isDefault: false,
-    confidenceThreshold: 0.8,
-    maxAutoTurns: 4,
-    safetyRules: "账号安全、支付异常、法律风险必须转人工；翻译失败时不自动发送。",
-    selectedDocIds: ["d7", "d8"],
-    tools: ["自动翻译", "查询订单"],
-    version: "1.0.0",
-    updatedAt: "昨天 18:12",
-  },
-]
+    selectedDocIds: [],
+    tools: [],
+    version: "已同步",
+    updatedAt: "已同步",
+  }
+}
 
-const executionLogs = [
-  { id: "e1", employee: "售后专员", status: "已回复", message: "How long will my refund take?", reply: "退款正在财务复核，预计 1-2 个工作日到账。", tokens: 428, time: "12:34" },
-  { id: "e2", employee: "售后专员", status: "已转人工", message: "Llevo esperando casi una semana.", reply: "高风险催办，转人工并附带摘要。", tokens: 512, time: "12:35" },
-  { id: "e3", employee: "售前助手", status: "已建议", message: "有优惠券吗？", reply: "限时折扣与优惠券可叠加。", tokens: 286, time: "11:58" },
-  { id: "e4", employee: "海外客服", status: "已暂停", message: "My account is locked.", reply: "账号安全风险，未自动回复。", tokens: 0, time: "11:50" },
-]
+function toEmployee(item: AIEmployee, options: ChannelOption[]): Employee {
+  const channels = (item.channels ?? []).map((binding) => binding.platform)
+  const coversAll = options.length > 0 && options.every((option) => channels.includes(option.platform))
+  return {
+    ...blankEmployee(),
+    id: item.employeeId,
+    name: item.name,
+    persona: item.persona ?? "",
+    status: item.status === "running" ? "运行中" : "已暂停",
+    mode: item.mode === "professional" ? "professional" : "basic",
+    prompt: item.prompt ?? "",
+    history: item.history || 10,
+    autoReply: item.autoReply,
+    channelScope: coversAll ? "all" : "selected",
+    channels,
+    selectedDocIds: item.selectedDocIds ?? [],
+    tools: item.tools ?? [],
+  }
+}
+
+function nextEmployeeName(items: Employee[]) {
+  const names = new Set(items.map((item) => item.name))
+  const base = "新 AI 客服"
+  if (!names.has(base)) return base
+  for (let index = 2; index < 100; index += 1) {
+    const name = `${base} ${index}`
+    if (!names.has(name)) return name
+  }
+  return `${base} ${Date.now()}`
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "请求失败"
+}
+
+function boundedNumber(value: string, min: number, max: number) {
+  if (value.trim() === "") return undefined
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return undefined
+  return Math.min(max, Math.max(min, parsed))
+}
+
+function apiStatus(status: EmployeeStatus, published: boolean): "running" | "paused" {
+  if (published || status === "运行中") return "running"
+  return "paused"
+}
+
+function EmployeeRail({
+  employees,
+  activeId,
+  loading,
+  saving,
+  emptyMessage,
+  onCreate,
+  onSelect,
+}: {
+  employees: Employee[]
+  activeId: string
+  loading: boolean
+  saving: boolean
+  emptyMessage: string
+  onCreate: () => void
+  onSelect: (id: string) => void
+}) {
+  return (
+    <aside className="flex max-h-72 flex-col overflow-hidden rounded-xl border bg-card xl:sticky xl:top-14 xl:max-h-[calc(100dvh-5.5rem)]">
+      <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
+        <p className="text-sm font-semibold">客服</p>
+        <Button type="button" variant="outline" size="sm" onClick={onCreate} disabled={saving || loading}>
+          <Bot />
+          创建
+        </Button>
+      </div>
+      {employees.length === 0 ? (
+        <p className="px-3 py-6 text-sm text-muted-foreground">{emptyMessage}</p>
+      ) : (
+        <ul className="min-h-0 flex-1 divide-y overflow-y-auto">
+          {employees.map((employee) => {
+            const selected = employee.id === activeId
+            return (
+              <li key={employee.id}>
+                <button
+                  type="button"
+                  aria-current={selected ? "true" : undefined}
+                  onClick={() => onSelect(employee.id)}
+                  className={cn(
+                    "flex w-full cursor-pointer items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-muted/70 focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                    selected && "bg-muted"
+                  )}
+                >
+                  <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-background text-foreground ring-1 ring-border">
+                    <Bot className="size-4" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-1.5">
+                      <span className="truncate text-sm font-medium">{employee.name}</span>
+                      {employee.isDefault ? (
+                        <>
+                          <Star className="size-3 shrink-0 fill-current text-amber-500" aria-hidden />
+                          <span className="sr-only">默认员工</span>
+                        </>
+                      ) : null}
+                    </span>
+                    <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                      {employee.persona || "未设置人设"}
+                    </span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+                    <span className={cn("size-2 rounded-full", statusTone[employee.status])} aria-hidden />
+                    {employee.status}
+                  </span>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </aside>
+  )
+}
 
 export function EmployeeView() {
-  const [employees, setEmployees] = useState(initialEmployees)
-  const [activeId, setActiveId] = useState(initialEmployees[0].id)
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [channelOptions, setChannelOptions] = useState<ChannelOption[]>([])
+  const [activeId, setActiveId] = useState("")
   const [notice, setNotice] = useState("")
+  const [noticeIsError, setNoticeIsError] = useState(false)
+  const [loadError, setLoadError] = useState("")
+  const [loadAttempt, setLoadAttempt] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const [testOpen, setTestOpen] = useState(false)
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false)
+  const [draftDocIds, setDraftDocIds] = useState<string[]>([])
+  const [draftTools, setDraftTools] = useState<string[]>([])
+  const [logs, setLogs] = useState<EmployeeExecution[]>([])
+  const [logsLoading, setLogsLoading] = useState(false)
+  const [logsError, setLogsError] = useState("")
+  const [logsAttempt, setLogsAttempt] = useState(0)
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [testMessage, setTestMessage] = useState("我的退款什么时候到账？")
   const [testResult, setTestResult] = useState<{ reply: string; knowledge: string; risk: string } | null>(null)
-  const active = employees.find((item) => item.id === activeId) ?? employees[0]
+  const [panel, setPanel] = useState<DetailPanel>("config")
+  const active = employees.find((item) => item.id === activeId)
+
+  useEffect(() => {
+    return () => {
+      if (noticeTimer.current) clearTimeout(noticeTimer.current)
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([listEmployees(), listEmployeeChannels()])
+      .then(([items, channels]) => {
+        if (cancelled) return
+        const views = items.map((item) => toEmployee(item, channels))
+        setChannelOptions(channels)
+        setEmployees(views)
+        setActiveId((current) => views.some((item) => item.id === current) ? current : views[0]?.id ?? "")
+        setLoadError("")
+      })
+      .catch((error) => {
+        if (!cancelled) setLoadError(errorMessage(error))
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [loadAttempt])
+
+  useEffect(() => {
+    if (!activeId) {
+      setLogs([])
+      return
+    }
+    let cancelled = false
+    setLogsLoading(true)
+    listEmployeeExecutions(activeId)
+      .then((items) => {
+        if (cancelled) return
+        setLogs(items)
+        setLogsError("")
+      })
+      .catch((error) => {
+        if (!cancelled) setLogsError(errorMessage(error))
+      })
+      .finally(() => {
+        if (!cancelled) setLogsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeId, logsAttempt])
 
   function update(patch: Partial<Employee>) {
+    if (!active) return
     setEmployees((current) =>
       current.map((item) => (item.id === active.id ? { ...item, ...patch } : item))
     )
   }
 
-  function toggleList(field: "selectedDocIds" | "tools" | "accounts", value: string) {
+  function toggleList(field: "selectedDocIds" | "tools" | "channels", value: string) {
+    if (!active) return
     const selected = active[field]
     update({
       [field]: selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value],
     } as Partial<Employee>)
   }
 
-  function toggleBase(baseId: string) {
+  function openKnowledge() {
+    if (!active) return
+    setDraftDocIds(active.selectedDocIds)
+    setDraftTools(active.tools)
+    setKnowledgeOpen(true)
+  }
+
+  function toggleDraftDoc(docId: string) {
+    setDraftDocIds((current) => current.includes(docId) ? current.filter((id) => id !== docId) : [...current, docId])
+  }
+
+  function toggleDraftBase(baseId: string) {
     const docIds = knowledgeDocs.filter((doc) => doc.baseId === baseId).map((doc) => doc.id)
-    const allSelected = docIds.every((id) => active.selectedDocIds.includes(id))
-    update({
-      selectedDocIds: allSelected
-        ? active.selectedDocIds.filter((id) => !docIds.includes(id))
-        : Array.from(new Set([...active.selectedDocIds, ...docIds])),
+    setDraftDocIds((current) => {
+      const allSelected = docIds.every((id) => current.includes(id))
+      return allSelected ? current.filter((id) => !docIds.includes(id)) : Array.from(new Set([...current, ...docIds]))
     })
   }
 
-  function notify(text: string) {
+  function toggleDraftTool(tool: string) {
+    setDraftTools((current) => current.includes(tool) ? current.filter((item) => item !== tool) : [...current, tool])
+  }
+
+  function applyKnowledge() {
+    update({ selectedDocIds: draftDocIds, tools: draftTools })
+    setKnowledgeOpen(false)
+  }
+
+  function notify(text: string, isError = false) {
+    if (noticeTimer.current) clearTimeout(noticeTimer.current)
     setNotice(text)
-    window.setTimeout(() => setNotice(""), 1800)
+    setNoticeIsError(isError)
+    if (!isError) {
+      noticeTimer.current = setTimeout(() => setNotice(""), 4000)
+    }
   }
 
-  function save(published: boolean) {
-    update({
-      status: published ? "运行中" : active.status,
-      updatedAt: published ? "刚刚" : active.updatedAt,
+  function bindingsFor(employee: Employee): ChannelBinding[] {
+    const chosen = employee.channelScope === "all"
+      ? channelOptions
+      : channelOptions.filter((option) => employee.channels.includes(option.platform))
+    return chosen.map(({ platform, label }) => ({ platform, label }))
+  }
+
+  function replaceEmployee(saved: AIEmployee, previous?: Employee) {
+    const next = {
+      ...toEmployee(saved, channelOptions),
+      reporting: previous?.reporting ?? true,
+      isDefault: previous?.isDefault ?? false,
+      channelScope: previous?.channelScope ?? "selected",
+    }
+    setEmployees((current) => {
+      const exists = current.some((item) => item.id === next.id)
+      return exists ? current.map((item) => (item.id === next.id ? next : item)) : [...current, next]
     })
-    notify(published ? "配置已保存并发布" : "草稿已保存")
+    setActiveId(next.id)
   }
 
-  function createEmployee() {
-    const id = String(Date.now())
-    const created: Employee = {
-      ...initialEmployees[0],
-      id,
-      name: "新 AI 客服员工",
-      status: "未配置",
-      isDefault: false,
-      version: "0.1.0",
-      updatedAt: "刚刚",
+  async function save(published: boolean) {
+    if (!active || saving) return
+    setSaving(true)
+    try {
+      const saved = await updateEmployee(active.id, {
+        name: active.name,
+        persona: active.persona,
+        status: apiStatus(active.status, published),
+        mode: active.mode,
+        prompt: active.prompt,
+        history: boundedNumber(String(active.history), 1, 50) ?? 10,
+        autoReply: active.autoReply,
+        selectedDocIds: active.selectedDocIds,
+        tools: active.tools,
+        channels: bindingsFor(active),
+      })
+      replaceEmployee(saved, active)
+      notify(
+        published
+          ? "已保存并启动"
+          : active.status === "运行中"
+            ? "草稿已保存，运行状态保持不变"
+            : active.status === "未配置"
+              ? "草稿已保存，未配置会按暂停保存"
+              : "草稿已保存"
+      )
+    } catch (error) {
+      notify(errorMessage(error), true)
+    } finally {
+      setSaving(false)
     }
-    setEmployees((current) => [...current, created])
-    setActiveId(id)
-    notify("已创建草稿配置")
   }
 
-  function duplicateEmployee() {
-    const id = String(Date.now())
-    const copy: Employee = {
-      ...active,
-      id,
-      name: `${active.name} 副本`,
-      status: "已暂停",
-      isDefault: false,
-      version: "0.1.0",
-      updatedAt: "刚刚",
+  async function createEmployee() {
+    if (saving) return
+    setSaving(true)
+    try {
+      const saved = await createEmployeeRequest(nextEmployeeName(employees))
+      replaceEmployee(saved)
+      notify("已创建 AI 客服")
+    } catch (error) {
+      notify(errorMessage(error), true)
+    } finally {
+      setSaving(false)
     }
-    setEmployees((current) => [...current, copy])
-    setActiveId(id)
-    notify("已复制配置")
   }
 
-  function deleteEmployee() {
-    if (employees.length <= 1) {
-      notify("至少保留一个 AI 客服员工")
-      return
+  async function duplicateEmployee() {
+    if (!active || saving) return
+    setSaving(true)
+    try {
+      const copyName = employees.some((item) => item.name === `${active.name} 副本`)
+        ? nextEmployeeName(employees)
+        : `${active.name} 副本`
+      const created = await createEmployeeRequest(copyName)
+      const saved = await updateEmployee(created.employeeId, {
+        name: created.name,
+        persona: active.persona,
+        status: "paused",
+        mode: active.mode,
+        prompt: active.prompt,
+        history: active.history,
+        autoReply: active.autoReply,
+        selectedDocIds: active.selectedDocIds,
+        tools: active.tools,
+        channels: [],
+      })
+      replaceEmployee(saved, { ...active, isDefault: false, name: saved.name, channelScope: "selected", channels: [] })
+      notify("已复制配置")
+    } catch (error) {
+      notify(errorMessage(error), true)
+    } finally {
+      setSaving(false)
     }
-    const remaining = employees.filter((item) => item.id !== active.id)
-    setEmployees(remaining)
-    setActiveId(remaining[0].id)
-    notify("已删除配置")
+  }
+
+  async function deleteEmployee() {
+    if (!active || saving) return
+    setSaving(true)
+    try {
+      await deleteEmployeeRequest(active.id)
+      const remaining = employees.filter((item) => item.id !== active.id)
+      setEmployees(remaining)
+      setActiveId(remaining[0]?.id ?? "")
+      notify("已删除配置")
+    } catch (error) {
+      notify(errorMessage(error), true)
+    } finally {
+      setSaving(false)
+    }
   }
 
   function setDefault() {
+    if (!active) return
     setEmployees((current) =>
       current.map((item) => ({
         ...item,
         isDefault: item.id === active.id,
       }))
     )
-    notify("已设为默认 AI 客服员工")
+    notify("已在当前页面设为默认，刷新后不会保留")
   }
 
   function runTest() {
@@ -298,112 +503,177 @@ export function EmployeeView() {
     }
   }
 
-  return (
-    <div className="grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
-      <aside className="flex flex-col gap-3">
-        <Button onClick={createEmployee}>
-          <Bot className="size-4" />
-          创建 AI 客服员工
-        </Button>
-
-        {employees.map((employee) => (
-          <Card
-            key={employee.id}
-            className={cn(
-              "cursor-pointer transition",
-              employee.id === active.id ? "border-primary" : "hover:border-muted-foreground"
-            )}
-            onClick={() => setActiveId(employee.id)}
-          >
-            <CardContent className="flex items-center gap-3">
-              <span className="grid size-11 place-items-center rounded-xl bg-primary/10 text-primary">
-                <Bot className="size-5" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <p className="truncate text-sm font-semibold">{employee.name}</p>
-                  {employee.isDefault ? <Star className="size-3.5 fill-current text-amber-500" /> : null}
-                </div>
-                <p className="mt-1 truncate text-xs text-muted-foreground">{employee.persona}</p>
-                <p className="mt-1 truncate text-[11px] text-muted-foreground">
-                  {replyModeLabels[employee.replyMode]} · {employee.accounts.length} 个账号 · {employee.version}
-                </p>
-              </div>
-              <Badge variant={statusVariant[employee.status]}>{employee.status}</Badge>
-            </CardContent>
-          </Card>
-        ))}
-      </aside>
-
-      <div className="flex flex-col gap-4">
-        <Card>
-          <CardHeader className="gap-3">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <CardTitle className="text-xl">{active.name}</CardTitle>
-                  <Badge variant={statusVariant[active.status]}>{active.status}</Badge>
-                  {active.isDefault ? <Badge variant="secondary">默认员工</Badge> : null}
-                  <Badge variant="outline">{active.version}</Badge>
-                </div>
-                <CardDescription className="mt-2 max-w-3xl">
-                  AI 客服员工是独立可分配对象。基础模式用于快速上线，专业模式开放知识库、工具、安全策略和发布流程。
-                </CardDescription>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <Select
-                  value={active.status}
-                  onValueChange={(value) => update({ status: value as EmployeeStatus })}
-                >
-                  <SelectTrigger size="sm" aria-label="运行状态">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="未配置">未配置</SelectItem>
-                    <SelectItem value="已暂停">已暂停</SelectItem>
-                    <SelectItem value="运行中">运行中</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Tabs value={active.mode} onValueChange={(value) => update({ mode: value as Mode })}>
-                  <TabsList>
-                    <TabsTrigger value="basic">基础</TabsTrigger>
-                    <TabsTrigger value="professional">专业</TabsTrigger>
-                  </TabsList>
-                </Tabs>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 border-t pt-3">
-              <Button variant="outline" size="sm" onClick={setDefault} disabled={active.isDefault}>
-                <Star className="size-3.5" />
-                设为默认
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => setTestOpen(true)}>
-                <FlaskConical className="size-3.5" />
-                测试会话
-              </Button>
-              <Button variant="outline" size="sm" onClick={duplicateEmployee}>
-                <Copy className="size-3.5" />
-                复制配置
-              </Button>
+  if (!active) {
+    const title = loading ? "正在加载" : loadError ? "列表加载失败" : "还没有 AI 客服"
+    const body = loading
+      ? "正在加载当前账号的 AI 客服。"
+      : loadError || "创建后，保存草稿和保存并启动会写入当前登录账号。"
+    return (
+      <div className="grid items-start gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
+        <EmployeeRail
+          employees={employees}
+          activeId=""
+          loading={loading}
+          saving={saving}
+          emptyMessage={loading ? "正在加载当前账号的 AI 客服…" : loadError || "当前账号还没有 AI 客服。"}
+          onCreate={createEmployee}
+          onSelect={setActiveId}
+        />
+        <div className="flex min-h-64 items-center justify-center rounded-xl border bg-card px-6 text-center">
+          <div className="max-w-sm">
+            <p className="text-sm font-semibold">{title}</p>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">{body}</p>
+            {loadError ? (
               <Button
+                type="button"
+                className="mt-4"
                 variant="outline"
-                size="sm"
-                onClick={() => update({ status: active.status === "运行中" ? "已暂停" : "运行中" })}
+                onClick={() => {
+                  setLoading(true)
+                  setLoadError("")
+                  setLoadAttempt((current) => current + 1)
+                }}
               >
-                {active.status === "运行中" ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
-                {active.status === "运行中" ? "暂停" : "启动"}
+                重试
               </Button>
-              <Button variant="ghost" size="sm" className="text-destructive" onClick={deleteEmployee}>
-                <Trash2 className="size-3.5" />
-                删除
-              </Button>
-              <span className="ml-auto text-xs text-muted-foreground">最近更新：{active.updatedAt}</span>
-            </div>
-          </CardHeader>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
-          <CardContent className="flex flex-col gap-5">
+  const checks = [
+    { title: "高风险转人工", value: active.reporting ? "已开启" : "未开启", ok: active.reporting },
+  ]
+  const knowledgeSummary = active.selectedDocIds.length === 0 && active.tools.length === 0
+    ? "未选择知识库或工具"
+    : `已选 ${active.selectedDocIds.length} 篇 · ${active.tools.length} 个工具`
+
+  return (
+    <>
+    <div className="grid items-start gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
+      <EmployeeRail
+        employees={employees}
+        activeId={active.id}
+        loading={loading}
+        saving={saving}
+        emptyMessage="当前账号还没有 AI 客服。"
+        onCreate={createEmployee}
+        onSelect={setActiveId}
+      />
+
+      <Tabs
+        value={panel}
+        onValueChange={(value) => setPanel(value as DetailPanel)}
+        className="min-w-0 gap-0 rounded-xl border bg-card"
+      >
+        <div className="sticky top-14 z-10 flex flex-col gap-3 border-b bg-card px-4 py-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <h2 className="flex items-center gap-1.5 text-base font-semibold">
+              {active.name}
+              {active.isDefault ? (
+                <>
+                  <Star className="size-3.5 fill-current text-amber-500" aria-hidden />
+                  <span className="sr-only">默认员工</span>
+                </>
+              ) : null}
+            </h2>
+            <Select
+              value={active.status}
+              onValueChange={(value) => update({ status: value as EmployeeStatus })}
+            >
+              <SelectTrigger size="sm" className="w-28" aria-label="运行状态">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="未配置">未配置</SelectItem>
+                <SelectItem value="已暂停">已暂停</SelectItem>
+                <SelectItem value="运行中">运行中</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {active.version}
+              <span className="px-1.5" aria-hidden>·</span>
+              {active.channelScope === "all" ? "全部渠道" : `${active.channels.length} 个渠道`}
+              <span className="px-1.5" aria-hidden>·</span>
+              最近更新 {active.updatedAt}
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+              <TabsList aria-label="详情">
+                <TabsTrigger value="config">配置</TabsTrigger>
+                <TabsTrigger value="logs">
+                  日志
+                  <span className="tabular-nums text-muted-foreground">{logs.length}</span>
+                </TabsTrigger>
+              </TabsList>
+
+            <div className="flex flex-wrap items-center justify-end gap-2" aria-busy={saving}>
+              {active.status === "运行中" ? (
+                <Button type="button" variant="outline" disabled={saving} onClick={() => update({ status: "已暂停" })}>
+                  <Pause />
+                  暂停
+                </Button>
+              ) : null}
+              {panel === "config" ? (
+                <>
+                  <Button type="button" variant="outline" onClick={() => save(false)} disabled={saving}>
+                    保存草稿
+                  </Button>
+                  <Button type="button" onClick={() => save(true)} disabled={saving}>
+                    <Save />
+                    保存并启动
+                  </Button>
+                </>
+              ) : null}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button type="button" variant="outline" aria-label="更多操作">
+                    <Ellipsis />
+                    更多
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem disabled={saving} onClick={() => setTestOpen(true)}>
+                    <FlaskConical />
+                    测试会话
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={saving || active.isDefault} onClick={setDefault}>
+                    <Star />
+                    设为默认
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={saving} onClick={duplicateEmployee}>
+                    <Copy />
+                    复制配置
+                  </DropdownMenuItem>
+                  {active.status === "运行中" ? null : (
+                    <DropdownMenuItem disabled={saving} onClick={() => update({ status: "运行中" })}>
+                      <Play />
+                      启动
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" disabled={saving} onClick={() => setConfirmDelete(true)}>
+                    <Trash2 />
+                    删除
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+          {notice ? (
+            <p role={noticeIsError ? "alert" : "status"} className={cn("text-xs leading-5", noticeIsError ? "text-destructive" : "text-muted-foreground")}>
+              {notice}
+            </p>
+          ) : null}
+        </div>
+
+          <TabsContent value="config" className="scroll-mt-40 outline-none">
+          <div className="flex flex-col gap-6 p-4 sm:p-5 [&_button]:scroll-mt-48 [&_input]:scroll-mt-48 [&_textarea]:scroll-mt-48">
+            <section className="flex flex-col gap-4">
+              <h3 className="text-sm font-semibold">基础信息</h3>
             <FieldGroup>
               <div className="grid gap-4 md:grid-cols-2">
                 <Field>
@@ -434,85 +704,83 @@ export function EmployeeView() {
                 />
               </Field>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field>
-                  <FieldLabel htmlFor="employee-business">负责业务</FieldLabel>
-                  <Input
-                    id="employee-business"
-                    value={active.businessScope}
-                    onChange={(event) => update({ businessScope: event.target.value })}
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="employee-history">历史消息读取条数</FieldLabel>
-                  <Input
-                    id="employee-history"
-                    type="number"
-                    min={1}
-                    max={50}
-                    value={active.history}
-                    onChange={(event) => update({ history: Number(event.target.value) })}
-                  />
-                  <FieldDescription>保留最近 1 到 50 条上下文。</FieldDescription>
-                </Field>
-              </div>
+              <Field className="max-w-sm">
+                <FieldLabel htmlFor="employee-history">历史消息读取条数</FieldLabel>
+                <Input
+                  id="employee-history"
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={active.history}
+                  onChange={(event) => {
+                    const next = boundedNumber(event.target.value, 1, 50)
+                    if (next !== undefined) update({ history: next })
+                  }}
+                />
+                <FieldDescription>保留最近 1 到 50 条上下文。</FieldDescription>
+              </Field>
+            </FieldGroup>
+            </section>
 
-              <div className="rounded-2xl border border-border p-4">
+            <section className="flex flex-col gap-3 border-t pt-5">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <p className="text-sm font-semibold">账号绑定</p>
+                    <h3 className="text-sm font-semibold">渠道绑定</h3>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      可以绑定全部账号，也可以只绑定指定平台账号。被占用的账号会显示当前 AI 员工。
+                      可以选择全部渠道，或只选指定渠道。
                     </p>
                   </div>
                   <ToggleGroup
                     type="single"
-                    value={active.accountScope}
-                    onValueChange={(value) => value && update({ accountScope: value as "all" | "selected" })}
+                    value={active.channelScope}
+                    onValueChange={(value) => value && update({ channelScope: value as "all" | "selected" })}
                     size="sm"
                   >
-                    <ToggleGroupItem value="all">全部账号</ToggleGroupItem>
-                    <ToggleGroupItem value="selected">指定账号</ToggleGroupItem>
+                    <ToggleGroupItem value="all">全部渠道</ToggleGroupItem>
+                    <ToggleGroupItem value="selected">指定渠道</ToggleGroupItem>
                   </ToggleGroup>
                 </div>
 
-                {active.accountScope === "selected" ? (
+                {active.channelScope === "selected" ? (
+                  channelOptions.length === 0 ? (
+                    <p className="mt-3 rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground">
+                      暂无可选渠道。员工本身仍可以保存。
+                    </p>
+                  ) : (
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    {accountOptions.map((account) => (
+                    {channelOptions.map((channel) => (
                       <button
-                        key={account.id}
+                        key={channel.platform}
                         type="button"
-                        onClick={() => toggleList("accounts", account.id)}
+                        onClick={() => toggleList("channels", channel.platform)}
                         className={cn(
-                          "flex items-center justify-between gap-2 rounded-lg border p-2.5 text-left text-xs transition",
-                          active.accounts.includes(account.id)
-                            ? "border-primary bg-primary/5"
+                          "flex cursor-pointer items-center justify-between gap-2 rounded-lg border p-2.5 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          active.channels.includes(channel.platform)
+                            ? "border-foreground bg-muted"
                             : "border-border bg-background hover:bg-muted/50"
                         )}
                       >
-                        <span className="min-w-0">
-                          <span className="flex items-center gap-1.5">
-                            <span className={cn("size-1.5 rounded-full", account.status === "在线" ? "bg-emerald-500" : "bg-slate-300")} />
-                            <span className="truncate">{account.id}</span>
-                          </span>
-                          <span className="mt-0.5 block text-[10px] text-muted-foreground">
-                            {account.status} · {account.owner}
-                          </span>
-                        </span>
-                        <span className="shrink-0 text-[10px] text-muted-foreground">
-                          {active.accounts.includes(account.id) ? "已绑定" : "可绑定"}
+                        <span className="min-w-0 truncate">{channel.label || channel.platform}</span>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {active.channels.includes(channel.platform) ? "已绑定" : "可绑定"}
                         </span>
                       </button>
                     ))}
                   </div>
+                  )
                 ) : (
                   <p className="mt-3 rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground">
-                    当前绑定全部账号。新接入账号会自动进入该 AI 员工的接待范围。
+                    当前绑定全部渠道。
                   </p>
                 )}
-              </div>
+            </section>
 
-              <div className="grid gap-4 md:grid-cols-3">
+            <section className="flex flex-col gap-3 border-t pt-5">
+              <div>
+                <h3 className="text-sm font-semibold">回复策略</h3>
+                <p className="mt-1 text-xs text-muted-foreground">自动回复会保存。转人工只留在当前页面。</p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
                 <div className="rounded-xl border border-border p-3">
                   <p className="text-sm font-medium">自动回复</p>
                   <p className="mt-1 text-xs text-muted-foreground">关闭后只生成建议，不自动发送。</p>
@@ -538,266 +806,152 @@ export function EmployeeView() {
                     />
                   </div>
                 </div>
-
-                <div className="rounded-xl border border-border p-3">
-                  <p className="text-sm font-medium">回复模式</p>
-                  <p className="mt-1 text-xs text-muted-foreground">仅建议 / 半自动 / 全自动。</p>
-                  <ToggleGroup
-                    type="single"
-                    value={active.replyMode}
-                    onValueChange={(value) => value && update({ replyMode: value as ReplyMode })}
-                    size="sm"
-                    className="mt-2"
-                  >
-                    {Object.entries(replyModeLabels).map(([value, label]) => (
-                      <ToggleGroupItem key={value} value={value} className="flex-1 text-[11px]">
-                        {label}
-                      </ToggleGroupItem>
-                    ))}
-                  </ToggleGroup>
-                </div>
               </div>
-            </FieldGroup>
+            </section>
 
-            {active.mode === "professional" ? (
-              <div className="grid gap-4 rounded-2xl bg-muted/50 p-4 xl:grid-cols-[1.35fr_1fr]">
-                <div className="flex flex-col gap-4">
-                  <div>
-                    <p className="text-sm font-semibold">知识库文档</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      可按产品分组整库选择，也可以只勾选具体文档。知识库只对本 AI 员工生效。
+            <section className="flex flex-wrap items-center justify-between gap-3 border-t pt-5">
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold">知识库与工具</h3>
+                <p className="mt-1 text-xs text-muted-foreground">{knowledgeSummary}</p>
+              </div>
+              <Button type="button" variant="outline" onClick={openKnowledge}>
+                <Library />
+                选择
+              </Button>
+            </section>
+
+            <section className="flex flex-col gap-3 border-t pt-5">
+              <div>
+                <h3 className="text-sm font-semibold">配置检查</h3>
+                <p className="mt-1 text-xs text-muted-foreground">发布前确认以下边界，避免 AI 在高风险场景越权回复。</p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                {checks.map((item) => (
+                  <div key={item.title} className="rounded-lg border px-3 py-2.5">
+                    <p className="text-xs text-muted-foreground">{item.title}</p>
+                    <p className={cn("mt-1 text-sm font-medium", item.ok ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400")}>
+                      {item.value}
                     </p>
                   </div>
+                ))}
+              </div>
+            </section>
+          </div>
+          </TabsContent>
+          <TabsContent value="logs" className="min-h-80 outline-none">
+            <EmployeeExecutionLogs
+              logs={logs}
+              loading={logsLoading}
+              error={logsError}
+              onRefresh={() => setLogsAttempt((current) => current + 1)}
+            />
+          </TabsContent>
+      </Tabs>
+    </div>
 
-                  {knowledgeGroups.map((group) => {
-                    const bases = knowledgeBases.filter((base) => base.groupId === group.id)
+      <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>删除 {active.name}？</DialogTitle>
+            <DialogDescription>删除后无法恢复，绑定和当前页面上的配置都会一起去掉。</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setConfirmDelete(false)}>取消</Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={saving}
+              onClick={() => {
+                setConfirmDelete(false)
+                void deleteEmployee()
+              }}
+            >
+              删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
+
+      <Dialog open={knowledgeOpen} onOpenChange={setKnowledgeOpen}>
+        <DialogContent className="flex max-h-[min(40rem,calc(100dvh-2rem))] w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
+          <DialogHeader className="border-b px-4 py-4">
+            <DialogTitle>知识库与工具</DialogTitle>
+            <DialogDescription>按产品分组选择文档，并勾选这个客服可以调用的工具。</DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
+            {knowledgeGroups.map((group) => {
+              const bases = knowledgeBases.filter((base) => base.groupId === group.id)
+              return (
+                <section key={group.id} className="flex flex-col gap-3">
+                  <p className="text-xs font-semibold text-muted-foreground">{group.name}</p>
+                  {bases.map((base) => {
+                    const docs = knowledgeDocs.filter((doc) => doc.baseId === base.id)
+                    const selectedCount = docs.filter((doc) => draftDocIds.includes(doc.id)).length
+                    const allSelected = docs.length > 0 && selectedCount === docs.length
                     return (
-                      <div key={group.id} className="rounded-xl border border-border bg-card p-4">
-                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                          {group.name}
-                        </p>
-                        <div className="mt-3 flex flex-col gap-3">
-                          {bases.map((base) => {
-                            const docs = knowledgeDocs.filter((doc) => doc.baseId === base.id)
-                            const selectedCount = docs.filter((doc) => active.selectedDocIds.includes(doc.id)).length
-                            const allSelected = docs.length > 0 && selectedCount === docs.length
-
+                      <div key={base.id} className="rounded-xl border p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-medium">{base.name}</p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">
+                              {base.product} · 已选 {selectedCount}/{docs.length}
+                            </p>
+                          </div>
+                          <Button type="button" variant={allSelected ? "secondary" : "outline"} size="xs" onClick={() => toggleDraftBase(base.id)}>
+                            {allSelected ? "取消整库" : "选择整库"}
+                          </Button>
+                        </div>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                          {docs.map((doc) => {
+                            const selected = draftDocIds.includes(doc.id)
                             return (
-                              <div key={base.id} className="rounded-xl bg-muted/60 p-3">
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <div>
-                                    <p className="text-sm font-medium">{base.name}</p>
-                                    <p className="mt-0.5 text-xs text-muted-foreground">
-                                      {base.product} · 已选 {selectedCount}/{docs.length}
-                                    </p>
-                                  </div>
-                                  <Button variant={allSelected ? "default" : "outline"} size="xs" onClick={() => toggleBase(base.id)}>
-                                    {allSelected ? "取消整库" : "选择整库"}
-                                  </Button>
-                                </div>
-                                <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                                  {docs.map((doc) => (
-                                    <button
-                                      type="button"
-                                      key={doc.id}
-                                      onClick={() => toggleList("selectedDocIds", doc.id)}
-                                      className={cn(
-                                        "rounded-lg border p-2 text-left text-xs",
-                                        active.selectedDocIds.includes(doc.id)
-                                          ? "border-primary bg-primary text-primary-foreground"
-                                          : "border-border bg-card text-muted-foreground"
-                                      )}
-                                    >
-                                      <span className="block truncate font-medium">{doc.title}</span>
-                                      <span
-                                        className={cn(
-                                          "mt-0.5 block",
-                                          active.selectedDocIds.includes(doc.id)
-                                            ? "text-primary-foreground/70"
-                                            : "text-muted-foreground"
-                                        )}
-                                      >
-                                        {doc.language} · {doc.status}
-                                      </span>
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
+                              <button
+                                type="button"
+                                key={doc.id}
+                                aria-pressed={selected}
+                                onClick={() => toggleDraftDoc(doc.id)}
+                                className={cn(
+                                  "cursor-pointer rounded-lg border p-2 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                  selected ? "border-foreground bg-muted text-foreground" : "border-border bg-background text-muted-foreground hover:bg-muted/60"
+                                )}
+                              >
+                                <span className="block truncate font-medium">{doc.title}</span>
+                                <span className="mt-0.5 block">{doc.language} · {doc.status}{selected ? " · 已选" : ""}</span>
+                              </button>
                             )
                           })}
                         </div>
                       </div>
                     )
                   })}
-                </div>
-
-                <div className="flex flex-col gap-4">
-                  <div>
-                    <p className="text-sm font-semibold">工具调用</p>
-                    <ToggleGroup
-                      type="multiple"
-                      value={active.tools}
-                      onValueChange={(value) => update({ tools: value })}
-                      variant="outline"
-                      className="mt-3 flex-wrap"
-                    >
-                      {toolOptions.map((item) => (
-                        <ToggleGroupItem key={item} value={item} className="text-xs">
-                          {item}
-                        </ToggleGroupItem>
-                      ))}
-                    </ToggleGroup>
-                  </div>
-
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field>
-                      <FieldLabel htmlFor="confidence-threshold">知识库置信度阈值</FieldLabel>
-                      <Input
-                        id="confidence-threshold"
-                        type="number"
-                        step="0.01"
-                        min={0}
-                        max={1}
-                        value={active.confidenceThreshold}
-                        onChange={(event) => update({ confidenceThreshold: Number(event.target.value) })}
-                      />
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor="max-auto-turns">最大自动回复轮数</FieldLabel>
-                      <Input
-                        id="max-auto-turns"
-                        type="number"
-                        min={1}
-                        max={20}
-                        value={active.maxAutoTurns}
-                        onChange={(event) => update({ maxAutoTurns: Number(event.target.value) })}
-                      />
-                    </Field>
-                  </div>
-
-                  <Field>
-                    <FieldLabel htmlFor="safety-rules">安全策略</FieldLabel>
-                    <Textarea
-                      id="safety-rules"
-                      value={active.safetyRules}
-                      onChange={(event) => update({ safetyRules: event.target.value })}
-                      className="min-h-24 text-xs leading-5"
-                    />
-                  </Field>
-
-                  <div className="rounded-xl border p-3">
-                    <p className="text-sm font-semibold">决策策略预览</p>
-                    <div className="mt-2 grid gap-2 text-xs">
-                      {[
-                        ["普通退款咨询", "reply"],
-                        ["会员权益问题", "suggest"],
-                        ["客户情绪愤怒", "escalate"],
-                        ["查询物流", "tool_call"],
-                        ["账号安全", "escalate"],
-                      ].map(([scene, strategy]) => (
-                        <div key={scene} className="flex items-center justify-between gap-2 rounded-lg bg-muted/60 px-2 py-1.5">
-                          <span className="text-muted-foreground">{scene}</span>
-                          <Badge variant={strategy === "escalate" ? "destructive" : "outline"} className="text-[10px]">
-                            {strategy}
-                          </Badge>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-amber-300/60 bg-amber-50 p-3 text-xs leading-5 text-amber-950 dark:border-amber-500/30 dark:bg-amber-950/30 dark:text-amber-100">
-                    <p className="flex items-center gap-1.5 font-medium">
-                      <ShieldCheck className="size-3.5" />
-                      专业模式风险提示
-                    </p>
-                    <p className="mt-1">调整置信度、最大轮数和工具权限后，建议先运行测试会话再灰度发布。</p>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-2xl border border-border bg-primary/10 p-4 text-sm leading-6 text-primary">
-                基础模式只保留名称、账号、提示词、上下文、自动回复和转人工规则。切到专业模式后，可以挂知识库、工具、安全策略和测试用例。
-              </div>
-            )}
-
-            <div className="rounded-2xl border border-border">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
-                <div>
-                  <p className="flex items-center gap-2 text-sm font-semibold">
-                    <History className="size-4" />
-                    最近执行记录
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">包含回复、转人工、忽略和失败记录。</p>
-                </div>
-                <Badge variant="outline">最近 24 小时</Badge>
-              </div>
-              <div className="divide-y">
-                {executionLogs.map((log) => (
-                  <div key={log.id} className="grid gap-2 px-4 py-3 text-xs sm:grid-cols-[100px_1fr_1fr_70px]">
-                    <div className="flex items-center gap-2">
-                      <Badge variant={log.status === "已转人工" ? "destructive" : log.status === "已暂停" ? "outline" : "secondary"} className="text-[10px]">
-                        {log.status}
-                      </Badge>
-                    </div>
-                    <div className="min-w-0">
-                      <p className="truncate text-muted-foreground">{log.message}</p>
-                      <p className="mt-0.5 text-[11px] text-muted-foreground">{log.employee}</p>
-                    </div>
-                    <p className="line-clamp-2 text-muted-foreground">{log.reply}</p>
-                    <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground sm:justify-end">
-                      <span>{log.tokens} tokens</span>
-                      <span>{log.time}</span>
-                    </div>
-                  </div>
+                </section>
+              )
+            })}
+            <section>
+              <p className="text-sm font-semibold">工具调用</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {toolOptions.map((tool) => (
+                  <Button
+                    key={tool}
+                    type="button"
+                    size="sm"
+                    variant={draftTools.includes(tool) ? "default" : "outline"}
+                    aria-pressed={draftTools.includes(tool)}
+                    onClick={() => toggleDraftTool(tool)}
+                  >
+                    {tool}
+                  </Button>
                 ))}
               </div>
-            </div>
-          </CardContent>
-
-          <CardFooter className="flex-wrap items-center justify-end gap-3">
-            <span className="mr-auto flex items-center gap-1.5 text-xs text-primary">
-              {notice ? <Check className="size-3.5" /> : null}
-              {notice}
-            </span>
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Settings2 className="size-3.5" />
-              草稿与发布共用同一份配置
-            </span>
-            <Button variant="outline" onClick={() => save(false)}>
-              保存草稿
-            </Button>
-            <Button onClick={() => save(true)}>
-              <Save className="size-4" />
-              保存并发布
-            </Button>
-          </CardFooter>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <CircleAlert className="size-4" />
-              配置检查
-            </CardTitle>
-            <CardDescription>发布前确认以下边界，避免 AI 在高风险场景越权回复。</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-3">
-            {[
-              { title: "高风险转人工", value: active.reporting ? "已开启" : "未开启", ok: active.reporting },
-              { title: "知识库置信度", value: active.confidenceThreshold >= 0.78 ? "合理" : "偏低", ok: active.confidenceThreshold >= 0.78 },
-              { title: "自动回复边界", value: active.replyMode === "full_auto" ? "需重点测试" : "人工可控", ok: active.replyMode !== "full_auto" },
-            ].map((item) => (
-              <div key={item.title} className="rounded-xl border p-3">
-                <p className="text-xs text-muted-foreground">{item.title}</p>
-                <p className={cn("mt-2 text-sm font-semibold", item.ok ? "text-emerald-600" : "text-amber-600")}>
-                  {item.value}
-                </p>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
+            </section>
+          </div>
+          <DialogFooter className="border-t px-4 py-3">
+            <Button type="button" variant="outline" onClick={() => setKnowledgeOpen(false)}>取消</Button>
+            <Button type="button" onClick={applyKnowledge}>确定</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={testOpen} onOpenChange={setTestOpen}>
         <DialogContent className="max-w-xl">
@@ -849,6 +1003,6 @@ export function EmployeeView() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   )
 }

@@ -97,7 +97,7 @@ const conversationItems: NavItem[] = [
 ]
 
 const aiItems: NavItem[] = [
-  { href: "/employee", label: "AI 客服员工", icon: Bot },
+  { href: "/employee", label: "AI 客服", icon: Bot },
   { href: "/knowledge", label: "知识库", icon: LibraryBig },
 ]
 
@@ -135,8 +135,8 @@ const pageTitles: Record<string, { eyebrow: string; title: string; description: 
   },
   "/employee": {
     eyebrow: "AI",
-    title: "AI 客服员工",
-    description: "配置 AI 员工的人设、知识范围和自动回复策略。",
+    title: "AI 客服",
+    description: "配置 AI 客服的人设、知识范围和自动回复策略。",
   },
   "/knowledge": {
     eyebrow: "AI",
