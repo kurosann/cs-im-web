@@ -52,19 +52,12 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { TablePagination } from "@/components/ui/table-pagination"
+import { ChannelAccessView as ServerChannelAccessView } from "@/components/workspace/channel-access-view"
 import { readSession } from "@/lib/auth"
 import {
   type AuditLog,
-  ChannelCredential,
   IamApiError,
-  issueChannelCredential,
-  listBusinessApps,
-  listChannelCredentials,
-  registerBusinessApp,
-  rotateChannelCredential,
-  setChannelCredentialStatus,
   createStaff,
-  deleteChannelCredential,
   forceStaffLogout,
   resetStaffPassword,
   listAuditLogs,
@@ -78,8 +71,6 @@ import {
 type ManagementKind = "team" | "channel-access" | "audit"
 type EmployeeRole = string
 type EmployeeStatus = "active" | "disabled"
-type BusinessChannelStatus = "active" | "expiring" | "disabled" | "revoked"
-type RelayChannelStatus = "active" | "disabled"
 type AuditResult = "success" | "denied" | "warning"
 
 type Employee = {
@@ -95,23 +86,6 @@ type Employee = {
   lastActiveAt: string
 }
 
-type BusinessChannel = {
-  id: string
-  name: string
-  appId: string
-  status: BusinessChannelStatus
-  expiresAt: string
-  lastUsedAt: string
-}
-
-type RelayChannel = {
-  id: string
-  name: string
-  target: string
-  status: RelayChannelStatus
-  lastDeliveredAt: string
-}
-
 const roleLabels: Record<string, string> = {
   admin: "管理员",
   supervisor: "主管",
@@ -122,18 +96,6 @@ const roleLabels: Record<string, string> = {
 
 const employeeStatusLabels: Record<EmployeeStatus, string> = {
   active: "启用",
-  disabled: "禁用",
-}
-
-const businessStatusLabels: Record<BusinessChannelStatus, string> = {
-  active: "正常",
-  expiring: "即将到期",
-  disabled: "禁用",
-  revoked: "已撤销",
-}
-
-const relayStatusLabels: Record<RelayChannelStatus, string> = {
-  active: "正常",
   disabled: "禁用",
 }
 
@@ -157,14 +119,6 @@ function copyShownValue(value: string, button: HTMLButtonElement, success: strin
 function auditResultLabel(value: AuditResult) {
   return auditResultLabels[value] ?? value
 }
-
-const builtinRelayChannelIds = new Set(["rc_1"])
-
-const initialRelayChannels: RelayChannel[] = [
-  { id: "rc_1", name: "Web / 手机", target: "平台统一前端", status: "active", lastDeliveredAt: "刚刚" },
-  { id: "rc_2", name: "Telegram", target: "Bot API", status: "active", lastDeliveredAt: "35 秒前" },
-  { id: "rc_3", name: "WhatsApp", target: "Cloud API", status: "disabled", lastDeliveredAt: "6 小时前" },
-]
 
 function statusVariant(status: string) {
   if (["active", "success"].includes(status)) return "secondary"
@@ -642,358 +596,6 @@ function TeamView() {
   )
 }
 
-function ChannelAccessView() {
-  const [businessChannels, setBusinessChannels] = useState<BusinessChannel[]>([])
-  const [relayChannels, setRelayChannels] = useState(initialRelayChannels)
-  const [businessKeyword, setBusinessKeyword] = useState("")
-  const [businessStatus, setBusinessStatus] = useState("all")
-  const [businessPage, setBusinessPage] = useState(1)
-  const [businessPageSize, setBusinessPageSize] = useState(10)
-  const [relayKeyword, setRelayKeyword] = useState("")
-  const [relayStatus, setRelayStatus] = useState("all")
-  const [relayPage, setRelayPage] = useState(1)
-  const [relayPageSize, setRelayPageSize] = useState(10)
-  const [createBusinessOpen, setCreateBusinessOpen] = useState(false)
-  const [createRelayOpen, setCreateRelayOpen] = useState(false)
-  const [issuedCredential, setIssuedCredential] = useState<{ appId: string; secret: string } | null>(null)
-  const [form, setForm] = useState({ name: "", target: "" })
-  const [isLoading, setIsLoading] = useState(true)
-  const [isRelayLoading, setIsRelayLoading] = useState(true)
-  const [isSaving, setIsSaving] = useState(false)
-
-  const showError = useCallback((error: unknown) => {
-    toast.error(error instanceof IamApiError ? error.message : "请求失败，请稍后重试。")
-  }, [])
-
-  const loadBusinessChannels = useCallback(async () => {
-    setIsLoading(true)
-    try {
-      const [apps, credentials] = await Promise.all([listBusinessApps(), listChannelCredentials()])
-      const credentialMap = new Map<string, ChannelCredential>(
-        credentials.map((credential) => [credential.appId, credential])
-      )
-      setBusinessChannels(
-        apps
-          .filter((app) => credentialMap.has(app.appId))
-          .map((app) => {
-            const credential = credentialMap.get(app.appId)
-            const expiresAt = credential?.expiresAt ?? null
-            const expiringSoon = expiresAt
-              ? new Date(expiresAt).getTime() - Date.now() < 30 * 24 * 60 * 60 * 1000
-              : false
-            const status = credential?.status === "active" && expiringSoon ? "expiring" : credential?.status
-            return {
-              id: app.appId,
-              appId: app.appId,
-              name: credential?.name ?? app.displayName,
-              status: (status ?? "active") as BusinessChannelStatus,
-              expiresAt: expiresAt ?? "",
-              lastUsedAt: formatTime(credential?.lastUsedAt),
-            }
-          }),
-      )
-    } catch (error) {
-      showError(error)
-    } finally {
-      setIsLoading(false)
-    }
-  }, [showError])
-
-  const loadRelayChannels = useCallback(async () => {
-    setIsRelayLoading(true)
-    setRelayChannels(initialRelayChannels)
-    setIsRelayLoading(false)
-  }, [])
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void loadBusinessChannels()
-      void loadRelayChannels()
-    }, 0)
-    return () => window.clearTimeout(timer)
-  }, [loadBusinessChannels, loadRelayChannels])
-
-  const visibleBusiness = useMemo(() => businessChannels.filter((channel) => {
-    const matchesKeyword = [channel.name, channel.appId].join(" ").toLowerCase().includes(businessKeyword.trim().toLowerCase())
-    const matchesStatus = businessStatus === "all" || channel.status === businessStatus
-    return matchesKeyword && matchesStatus
-  }), [businessChannels, businessKeyword, businessStatus])
-
-  const visibleRelay = useMemo(() => relayChannels.filter((channel) => {
-    const matchesKeyword = [channel.name, channel.target].join(" ").toLowerCase().includes(relayKeyword.trim().toLowerCase())
-    const matchesStatus = relayStatus === "all" || channel.status === relayStatus
-    return matchesKeyword && matchesStatus
-  }), [relayChannels, relayKeyword, relayStatus])
-
-  const pagedBusiness = visibleBusiness.slice(
-    (businessPage - 1) * businessPageSize,
-    businessPage * businessPageSize,
-  )
-  const pagedRelay = visibleRelay.slice(
-    (relayPage - 1) * relayPageSize,
-    relayPage * relayPageSize,
-  )
-
-  async function createBusinessChannel() {
-    const name = form.name.trim()
-    if (!name || isSaving) return
-    setIsSaving(true)
-    try {
-      const app = await registerBusinessApp({ displayName: name, serviceKey: name })
-      const credential = await issueChannelCredential({ appId: app.appId, name })
-      await loadBusinessChannels()
-      setCreateBusinessOpen(false)
-      setIssuedCredential({ appId: credential.credential.appId, secret: credential.secret })
-      setForm({ name: "", target: "" })
-      toast.success("业务渠道已创建")
-    } catch (error) {
-      showError(error)
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  function createRelayChannel() {
-    if (!form.name.trim() || !form.target.trim()) return
-    setRelayChannels((current) => [{ id: `rc_${Date.now()}`, name: form.name.trim(), target: form.target.trim(), status: "active", lastDeliveredAt: "从未投递" }, ...current])
-    setCreateRelayOpen(false)
-    setForm({ name: "", target: "" })
-    toast.success("转发渠道已创建")
-  }
-
-  async function rotateBusinessSecret(id: string) {
-    if (isSaving) return
-    setIsSaving(true)
-    try {
-      const credential = await rotateChannelCredential(id)
-      await loadBusinessChannels()
-      setIssuedCredential({ appId: credential.credential.appId, secret: credential.secret })
-      toast.success("旧 SecretKey 已失效")
-    } catch (error) {
-      showError(error)
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  async function toggleBusinessStatus(id: string, next: Exclude<BusinessChannelStatus, "expiring">) {
-    if (isSaving) return
-    setIsSaving(true)
-    try {
-      await setChannelCredentialStatus(id, next)
-      await loadBusinessChannels()
-      toast.success("业务凭证状态已更新")
-    } catch (error) {
-      showError(error)
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  async function deleteBusinessChannel(id: string) {
-    if (isSaving) return
-    setIsSaving(true)
-    try {
-      await deleteChannelCredential(id)
-      await loadBusinessChannels()
-      toast.success("业务渠道已删除")
-    } catch (error) {
-      showError(error)
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  function toggleRelayStatus(id: string) {
-    if (builtinRelayChannelIds.has(id)) return
-    setRelayChannels((current) => current.map((channel) => channel.id === id ? { ...channel, status: channel.status === "active" ? "disabled" : "active" } : channel))
-    toast.success("转发渠道状态已更新")
-  }
-
-  return (
-    <>
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Card><CardHeader><CardDescription>业务渠道</CardDescription><CardTitle className="text-2xl">{businessChannels.length}</CardTitle></CardHeader></Card>
-        <Card><CardHeader><CardDescription>正常凭证</CardDescription><CardTitle className="text-2xl">{businessChannels.filter((item) => item.status === "active").length}</CardTitle></CardHeader></Card>
-        <Card><CardHeader><CardDescription>即将到期</CardDescription><CardTitle className="text-2xl">{businessChannels.filter((item) => item.status === "expiring").length}</CardTitle></CardHeader></Card>
-        <Card><CardHeader><CardDescription>转发渠道</CardDescription><CardTitle className="text-2xl">{relayChannels.length}</CardTitle></CardHeader></Card>
-      </section>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>业务渠道</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Table
-            loading={isLoading}
-            loadingMode={pagedBusiness.length === 0 ? "visible" : "silent"}
-            loadingLabel="正在加载业务渠道…"
-            refreshing={isLoading}
-            onRefresh={loadBusinessChannels}
-            tableFilters={(
-              <FilterBar
-                keyword={businessKeyword}
-                onKeywordChange={(value) => { setBusinessPage(1); setBusinessKeyword(value) }}
-                selects={[{ value: businessStatus, onChange: (value) => { setBusinessPage(1); setBusinessStatus(value) }, placeholder: "状态", options: [{ value: "all", label: "全部状态" }, ...Object.entries(businessStatusLabels).map(([value, label]) => ({ value, label }))] }]}
-              />
-            )}
-            tableActionsRight={(
-              <Button onClick={() => setCreateBusinessOpen(true)}>
-                <Plus className="size-4" />
-                创建业务渠道
-              </Button>
-            )}
-          >
-            <TableHeader>
-              <TableRow>
-                <TableHead>渠道</TableHead>
-                <TableHead>AppID</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>到期时间</TableHead>
-                <TableHead>最近使用</TableHead>
-                <TableHead className="text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {pagedBusiness.map((channel) => (
-                <TableRow key={channel.id}>
-                  <TableCell className="font-medium">{channel.name}</TableCell>
-                  <TableCell className="font-mono text-xs">{channel.appId}</TableCell>
-                  <TableCell><Badge variant={statusVariant(channel.status)}>{businessStatusLabels[channel.status]}</Badge></TableCell>
-                  <TableCell className="text-muted-foreground">{channel.expiresAt}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{channel.lastUsedAt}</TableCell>
-                  <TableCell className="text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild><Button variant="ghost" size="icon-sm" aria-label={`操作 ${channel.name}`}><MoreHorizontal className="size-4" /></Button></DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem className="whitespace-nowrap" onClick={() => rotateBusinessSecret(channel.id)}>更新密钥</DropdownMenuItem>
-                        <DropdownMenuItem variant="destructive" onClick={() => toggleBusinessStatus(channel.id, "revoked")}>撤销凭证</DropdownMenuItem>
-                        <DropdownMenuItem variant="destructive" onClick={() => deleteBusinessChannel(channel.id)}>删除</DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {!isLoading && pagedBusiness.length === 0 ? <EmptyRows colSpan={6} title="没有匹配业务渠道" description="调整状态或搜索关键词。" /> : null}
-            </TableBody>
-          </Table>
-          <TablePagination
-            total={visibleBusiness.length}
-            page={businessPage}
-            pageSize={businessPageSize}
-            onPageChange={setBusinessPage}
-            onPageSizeChange={(size) => { setBusinessPage(1); setBusinessPageSize(size) }}
-          />
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>平台转发渠道</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Table
-            loading={isRelayLoading}
-            loadingMode={pagedRelay.length === 0 ? "visible" : "silent"}
-            loadingLabel="正在加载转发渠道…"
-            refreshing={isRelayLoading}
-            onRefresh={loadRelayChannels}
-            tableFilters={(
-              <FilterBar
-                keyword={relayKeyword}
-                onKeywordChange={(value) => { setRelayPage(1); setRelayKeyword(value) }}
-                selects={[{ value: relayStatus, onChange: (value) => { setRelayPage(1); setRelayStatus(value) }, placeholder: "状态", options: [{ value: "all", label: "全部状态" }, ...Object.entries(relayStatusLabels).map(([value, label]) => ({ value, label }))] }]}
-              />
-            )}
-            tableActionsRight={(
-              <Button onClick={() => setCreateRelayOpen(true)}>
-                <Plus className="size-4" />
-                添加转发渠道
-              </Button>
-            )}
-          >
-            <TableHeader>
-              <TableRow>
-                <TableHead>渠道</TableHead>
-                <TableHead>投递目标</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>最近投递</TableHead>
-                <TableHead className="text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {pagedRelay.map((channel) => (
-                <TableRow key={channel.id}>
-                  <TableCell className="font-medium">{channel.name}</TableCell>
-                  <TableCell className="text-muted-foreground">{channel.target}</TableCell>
-                  <TableCell><Badge variant={statusVariant(channel.status)}>{relayStatusLabels[channel.status]}</Badge></TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{channel.lastDeliveredAt}</TableCell>
-                  <TableCell className="text-right">
-                    {builtinRelayChannelIds.has(channel.id) ? (
-                      <span className="text-muted-foreground">—</span>
-                    ) : (
-                      <Button variant="ghost" size="sm" onClick={() => toggleRelayStatus(channel.id)}>{channel.status === "active" ? "禁用" : "启用"}</Button>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-              {!isRelayLoading && pagedRelay.length === 0 ? <EmptyRows colSpan={5} title="没有匹配转发渠道" description="调整状态或搜索关键词。" /> : null}
-            </TableBody>
-          </Table>
-          <TablePagination
-            total={visibleRelay.length}
-            page={relayPage}
-            pageSize={relayPageSize}
-            onPageChange={setRelayPage}
-            onPageSizeChange={(size) => { setRelayPage(1); setRelayPageSize(size) }}
-          />
-        </CardContent>
-      </Card>
-
-      <Dialog open={createBusinessOpen} onOpenChange={setCreateBusinessOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader><DialogTitle>创建业务渠道</DialogTitle><DialogDescription>创建后仅返回一次 SecretKey 明文。</DialogDescription></DialogHeader>
-          <div className="-mx-4 no-scrollbar max-h-[50vh] overflow-y-auto px-4 py-3">
-            <FieldGroup>
-            <Field><FieldLabel>渠道名称</FieldLabel><Input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="例如：官网客服接入" /></Field>
-            </FieldGroup>
-          </div>
-          <DialogFooter><Button variant="outline" onClick={() => setCreateBusinessOpen(false)}>取消</Button><Button onClick={createBusinessChannel}>创建并签发</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={createRelayOpen} onOpenChange={setCreateRelayOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader><DialogTitle>添加转发渠道</DialogTitle><DialogDescription>连接配置和凭证由平台保存。</DialogDescription></DialogHeader>
-          <div className="-mx-4 no-scrollbar max-h-[50vh] overflow-y-auto px-4 py-3">
-            <FieldGroup>
-            <Field><FieldLabel>渠道名称</FieldLabel><Input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="例如：飞书" /></Field>
-            <Field><FieldLabel>投递目标</FieldLabel><Input value={form.target} onChange={(event) => setForm({ ...form, target: event.target.value })} placeholder="例如：Bot API / Webhook 地址" /></Field>
-            </FieldGroup>
-          </div>
-          <DialogFooter><Button variant="outline" onClick={() => setCreateRelayOpen(false)}>取消</Button><Button onClick={createRelayChannel}>添加</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={Boolean(issuedCredential)} onOpenChange={(open) => !open && setIssuedCredential(null)}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader><DialogTitle>SecretKey 只显示一次</DialogTitle><DialogDescription>请立即复制并保存到业务后端的密钥管理服务。</DialogDescription></DialogHeader>
-          <div className="-mx-4 no-scrollbar max-h-[50vh] overflow-y-auto px-4 py-3">
-            <div className="space-y-3">
-            <div className="space-y-1"><p className="text-xs text-muted-foreground">AppID</p><div className="rounded-lg border bg-muted/40 p-3 font-mono text-xs break-all">{issuedCredential?.appId}</div></div>
-            <div className="space-y-1"><p className="text-xs text-muted-foreground">SecretKey</p><div data-copy-source className="rounded-lg border bg-muted/40 p-3 font-mono text-xs break-all">{issuedCredential?.secret}</div></div>
-            <Button variant="outline" type="button" onClick={(event) => copyShownValue(issuedCredential?.secret ?? "", event.currentTarget, "SecretKey 已复制")}>
-              <Copy className="size-4" />复制 SecretKey
-            </Button>
-            </div>
-          </div>
-          <DialogFooter><Button onClick={() => setIssuedCredential(null)}>我已保存</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
-  )
-}
-
 function AuditView() {
   const [keyword, setKeyword] = useState("")
   const [result, setResult] = useState("all")
@@ -1097,7 +699,7 @@ export function PlatformManagement({ kind }: { kind: ManagementKind }) {
   return (
     <div className="space-y-4">
       {kind === "team" ? <TeamView /> : null}
-      {kind === "channel-access" ? <ChannelAccessView /> : null}
+      {kind === "channel-access" ? <ServerChannelAccessView notice={(message) => toast.success(message)} /> : null}
       {kind === "audit" ? <AuditView /> : null}
     </div>
   )
