@@ -570,7 +570,12 @@ export function ChatRoom() {
       translated: quickTranslations[message.text ?? ""]?.[translationLanguage],
       time: formatChatTime(message.receivedAt ?? ""),
       seq: message.seq,
-      senderName: message.sender?.role === "agent" ? operatorName || message.sender.id : undefined,
+      senderName:
+        message.sender?.role === "agent"
+          ? operatorName || message.sender.id
+          : message.sender?.role === "ai"
+            ? "AI 客服"
+            : undefined,
     }))
   }, [messages, operatorName, translationLanguage])
 
@@ -742,7 +747,7 @@ export function ChatRoom() {
                     </MessageScrollerItem>
                   ) : null}
                   {displayMessages.map((message, index) => {
-                    const isAgent = message.role === "agent"
+                    const isAgent = message.role === "agent" || message.role === "ai"
                     const showReadDivider = index === firstUnreadIndex
 
                     return (

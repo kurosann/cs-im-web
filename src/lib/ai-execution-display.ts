@@ -59,6 +59,7 @@ const platformNames: Record<string, string> = {
   x: "X",
   web: "Web Chat",
   messenger: "Messenger",
+  test: "测试",
 }
 
 const statusLabels: Record<string, string> = {
@@ -116,6 +117,9 @@ export function executionResultText(item: EmployeeExecution) {
   if (item.status === "reported") return "已转交中控，未向客户发送 AI 回复"
   if (item.status === "replied") return item.replyText?.trim() || "已回复"
   if (item.status === "failed") {
+    if (item.reasonCode === "model_error") {
+      return item.error?.trim() || item.reason?.trim() || "模型调用失败，未向客户发送回复"
+    }
     return item.result === "report_failed" || item.action === "escalate" ? "上报中控失败，未向客户发送 AI 回复" : "回复失败"
   }
   return executionStatusLabel(item.status)

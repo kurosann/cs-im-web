@@ -23,9 +23,11 @@ import {
   listEmployeeChannels,
   listEmployeeExecutions,
   listEmployees,
+  testEmployee,
   updateEmployee,
   type AIEmployee,
   type ChannelBinding,
+  type TestTurn,
 } from "@/lib/ai-employees"
 import type { EmployeeExecution } from "@/lib/ai-execution-display"
 import { cn } from "@/lib/utils"
@@ -257,7 +259,14 @@ export function EmployeeView() {
   const [logsAttempt, setLogsAttempt] = useState(0)
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [testMessage, setTestMessage] = useState("我的退款什么时候到账？")
-  const [testResult, setTestResult] = useState<{ reply: string; knowledge: string; risk: string } | null>(null)
+  const [testTurns, setTestTurns] = useState<TestTurn[]>([])
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<{
+    reply: string
+    knowledge: string
+    risk: string
+    action: string
+  } | null>(null)
   const [panel, setPanel] = useState<DetailPanel>("config")
   const active = employees.find((item) => item.id === activeId)
 
@@ -266,6 +275,12 @@ export function EmployeeView() {
       if (noticeTimer.current) clearTimeout(noticeTimer.current)
     }
   }, [])
+
+  useEffect(() => {
+    setTestTurns([])
+    setTestResult(null)
+    setTestMessage("我的退款什么时候到账？")
+  }, [activeId])
 
   useEffect(() => {
     let cancelled = false
@@ -489,17 +504,39 @@ export function EmployeeView() {
     notify("已在当前页面设为默认，刷新后不会保留")
   }
 
-  function runTest() {
+  async function runTest() {
+    if (!active || testing) return
     const value = testMessage.trim()
     if (!value) return
-    if (/账号|锁定|登录/.test(value)) {
-      setTestResult({ reply: "检测到账号安全风险，AI 不会自动回复，已转人工并附带会话摘要。", knowledge: "账号安全流程", risk: "高" })
-    } else if (/退款|退货/.test(value)) {
-      setTestResult({ reply: "退款正在财务复核中，预计 1-2 个工作日到账，我会继续跟进。", knowledge: "退款多久到账？", risk: "中" })
-    } else if (/物流|快递/.test(value)) {
-      setTestResult({ reply: "我先为您查询最新物流状态，请稍等。", knowledge: "物流查询工具", risk: "低" })
-    } else {
-      setTestResult({ reply: "已收到您的问题，我会结合知识库为您核实。", knowledge: "通用问答", risk: "低" })
+    setTesting(true)
+    try {
+      const result = await testEmployee(active.id, {
+        prompt: active.prompt,
+        persona: active.persona,
+        history: active.history,
+        autoReply: active.autoReply,
+        selectedDocIds: active.selectedDocIds,
+        message: value,
+        historyTurns: testTurns,
+      })
+      const replyText = result.replyText?.trim() ?? ""
+      setTestTurns((current) => {
+        const next: TestTurn[] = [...current, { role: "customer", text: value }]
+        if (replyText) next.push({ role: "business", text: replyText })
+        return next
+      })
+      setTestResult({
+        reply: replyText || result.reason || result.error || "模型没有生成回复",
+        knowledge: result.knowledge?.length ? result.knowledge.join("、") : "未命中知识库",
+        risk: result.risk || "低",
+        action: result.action || "failed",
+      })
+      setTestMessage("")
+      setLogsAttempt((current) => current + 1)
+    } catch (error) {
+      notify(errorMessage(error), true)
+    } finally {
+      setTesting(false)
     }
   }
 
@@ -960,6 +997,16 @@ export function EmployeeView() {
             <DialogDescription>使用当前配置模拟一条客户消息，检查知识命中、风险和回复边界。</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
+            {testTurns.length > 0 ? (
+              <div className="max-h-40 space-y-2 overflow-y-auto rounded-xl border bg-muted/30 p-3">
+                {testTurns.map((turn, index) => (
+                  <p key={`${turn.role}-${index}`} className="text-sm leading-6">
+                    <span className="mr-2 text-xs text-muted-foreground">{turn.role === "customer" ? "客户" : "客服"}</span>
+                    {turn.text}
+                  </p>
+                ))}
+              </div>
+            ) : null}
             <Field>
               <FieldLabel htmlFor="test-message">客户消息</FieldLabel>
               <Textarea
@@ -973,13 +1020,11 @@ export function EmployeeView() {
             {testResult ? (
               <div className="space-y-3 rounded-xl border border-dashed bg-muted/40 p-3">
                 <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <Badge variant={testResult.risk === "高" ? "destructive" : testResult.risk === "中" ? "outline" : "secondary"}>
+                  <Badge variant={testResult.risk === "高" ? "destructive" : "secondary"}>
                     风险：{testResult.risk}
                   </Badge>
                   <Badge variant="outline">命中：{testResult.knowledge}</Badge>
-                  <Badge variant={active.status === "运行中" ? "secondary" : "ghost"}>
-                    配置：{active.status}
-                  </Badge>
+                  <Badge variant="outline">动作：{testResult.action}</Badge>
                 </div>
                 <div>
                   <p className="text-xs font-medium text-muted-foreground">AI 将回复</p>
@@ -988,7 +1033,7 @@ export function EmployeeView() {
                 {testResult.risk === "高" ? (
                   <p className="flex items-start gap-1.5 text-xs text-destructive">
                     <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
-                    高风险命中：当前配置下不会自动发送，必须人工确认。
+                    高风险或模型失败：不会上报中控。
                   </p>
                 ) : null}
               </div>
@@ -996,9 +1041,9 @@ export function EmployeeView() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setTestOpen(false)}>关闭</Button>
-            <Button onClick={runTest} disabled={!testMessage.trim()}>
+            <Button onClick={() => void runTest()} disabled={testing || !testMessage.trim()}>
               <Play className="size-4" />
-              运行测试
+              {testing ? "测试中" : "运行测试"}
             </Button>
           </DialogFooter>
         </DialogContent>

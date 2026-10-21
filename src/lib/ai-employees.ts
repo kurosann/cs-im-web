@@ -91,3 +91,43 @@ export function deleteEmployee(id: string) {
 export function listEmployeeExecutions(id: string) {
   return request<EmployeeExecution[]>(`/api/v1/ai/employees/${id}/executions?limit=200`).then((items) => items ?? [])
 }
+
+export type TestTurn = {
+  role: "customer" | "business"
+  text: string
+}
+
+export type TestEmployeeInput = {
+  prompt: string
+  persona: string
+  history: number
+  autoReply: boolean
+  selectedDocIds: string[]
+  message: string
+  historyTurns: TestTurn[]
+}
+
+export type TestEmployeeResult = {
+  action: string
+  replyText: string
+  reasonCode: string
+  reason: string
+  knowledge: string[]
+  risk: string
+  error?: string
+}
+
+export function testEmployee(id: string, input: TestEmployeeInput) {
+  return request<TestEmployeeResult>(`/api/v1/ai/employees/${id}/test`, {
+    method: "POST",
+    body: JSON.stringify({
+      prompt: input.prompt,
+      persona: input.persona,
+      history: input.history,
+      autoReply: input.autoReply,
+      selectedDocIds: input.selectedDocIds,
+      message: input.message,
+      historyTurns: input.historyTurns,
+    }),
+  })
+}
