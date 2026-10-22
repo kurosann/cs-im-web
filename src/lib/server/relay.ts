@@ -5,6 +5,21 @@ type ApiEnvelope<T> = {
   data: T
 }
 
+export async function requireWebSession(request: Request) {
+	const token = request.headers.get("Authorization")?.replace(/^Bearer /, "")
+	if (!token) {
+		return Response.json({ code: "UNAUTHORIZED", message: "请先登录。" }, { status: 401 })
+	}
+	const response = await fetch(`${apiBase}/api/v1/auth/me`, {
+		headers: { Authorization: `Bearer ${token}` },
+	})
+	const payload = (await response.json().catch(() => null)) as ApiEnvelope<unknown> | null
+	if (!response.ok || !payload || payload.code !== "OK") {
+		return Response.json({ code: "UNAUTHORIZED", message: payload?.message ?? "请先登录。" }, { status: 401 })
+	}
+	return null
+}
+
 export async function relayJSON<T>(request: Request, path: string, init: RequestInit = {}): Promise<Response> {
 	const token = request.headers.get("Authorization")?.replace(/^Bearer /, "")
 	if (!token) {

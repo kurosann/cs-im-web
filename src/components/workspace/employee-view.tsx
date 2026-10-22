@@ -263,17 +263,21 @@ export function EmployeeView() {
   const [panel, setPanel] = useState<DetailPanel>("config")
   const active = employees.find((item) => item.id === activeId)
 
+  function selectEmployee(id: string) {
+    setTestTurns([])
+    setTestResult(null)
+    setTestMessage("我的退款什么时候到账？")
+    if (!id) {
+      setLogs([])
+    }
+    setActiveId(id)
+  }
+
   useEffect(() => {
     return () => {
       if (noticeTimer.current) clearTimeout(noticeTimer.current)
     }
   }, [])
-
-  useEffect(() => {
-    setTestTurns([])
-    setTestResult(null)
-    setTestMessage("我的退款什么时候到账？")
-  }, [activeId])
 
   useEffect(() => {
     let cancelled = false
@@ -283,7 +287,9 @@ export function EmployeeView() {
         const views = items.map((item) => toEmployee(item, channels))
         setChannelOptions(channels)
         setEmployees(views)
-        setActiveId((current) => views.some((item) => item.id === current) ? current : views[0]?.id ?? "")
+        if (!views.some((item) => item.id === activeId)) {
+          selectEmployee(views[0]?.id ?? "")
+        }
         setLoadError("")
       })
       .catch((error) => {
@@ -299,24 +305,26 @@ export function EmployeeView() {
 
   useEffect(() => {
     if (!activeId) {
-      setLogs([])
       return
     }
     let cancelled = false
-    setLogsLoading(true)
-    listEmployeeExecutions(activeId)
-      .then((items) => {
-        if (cancelled) return
-        setLogs(items)
-        setLogsError("")
-      })
-      .catch((error) => {
-        if (!cancelled) setLogsError(errorMessage(error))
-      })
-      .finally(() => {
-        if (!cancelled) setLogsLoading(false)
-      })
+    const timer = window.setTimeout(() => {
+      setLogsLoading(true)
+      listEmployeeExecutions(activeId)
+        .then((items) => {
+          if (cancelled) return
+          setLogs(items)
+          setLogsError("")
+        })
+        .catch((error) => {
+          if (!cancelled) setLogsError(errorMessage(error))
+        })
+        .finally(() => {
+          if (!cancelled) setLogsLoading(false)
+        })
+    }, 0)
     return () => {
+      window.clearTimeout(timer)
       cancelled = true
     }
   }, [activeId, logsAttempt])
@@ -391,7 +399,7 @@ export function EmployeeView() {
       const exists = current.some((item) => item.id === next.id)
       return exists ? current.map((item) => (item.id === next.id ? next : item)) : [...current, next]
     })
-    setActiveId(next.id)
+    selectEmployee(next.id)
   }
 
   async function save(published: boolean) {
@@ -477,7 +485,7 @@ export function EmployeeView() {
       await deleteEmployeeRequest(active.id)
       const remaining = employees.filter((item) => item.id !== active.id)
       setEmployees(remaining)
-      setActiveId(remaining[0]?.id ?? "")
+      selectEmployee(remaining[0]?.id ?? "")
       notify("已删除配置")
     } catch (error) {
       notify(errorMessage(error), true)
