@@ -55,13 +55,6 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
@@ -616,26 +609,6 @@ export function EmployeeView() {
                 </>
               ) : null}
             </h2>
-            <Select
-              value={active.status}
-              onValueChange={(value) => update({ status: value as EmployeeStatus })}
-            >
-              <SelectTrigger size="sm" className="w-28" aria-label="运行状态">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="未配置">未配置</SelectItem>
-                <SelectItem value="已暂停">已暂停</SelectItem>
-                <SelectItem value="运行中">运行中</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              {active.version}
-              <span className="px-1.5" aria-hidden>·</span>
-              {active.channelScope === "all" ? "全部渠道" : `${active.channels.length} 个渠道`}
-              <span className="px-1.5" aria-hidden>·</span>
-              最近更新 {active.updatedAt}
-            </p>
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
