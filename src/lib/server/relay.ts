@@ -1,48 +1,20 @@
 const apiBase = process.env.CS_IM_API_BASE ?? "http://127.0.0.1:8080"
-const relayToken = process.env.CS_IM_RELAY_TOKEN ?? ""
-
 type ApiEnvelope<T> = {
   code: string
   message?: string
   data: T
 }
 
-export async function requireWebSession(request: Request) {
-  const token = request.headers.get("Authorization")?.replace(/^Bearer /, "")
-  if (!token) {
-    return Response.json(
-      { code: "UNAUTHORIZED", message: "请先登录。" },
-      { status: 401 },
-    )
-  }
-
-  const response = await fetch(`${apiBase}/api/v1/auth/me`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  const payload = (await response.json().catch(() => null)) as ApiEnvelope<unknown> | null
-  if (!response.ok || !payload || payload.code !== "OK") {
-    return Response.json(
-      { code: "UNAUTHORIZED", message: payload?.message ?? "请先登录。" },
-      { status: 401 },
-    )
-  }
-  return null
-}
-
-function unauthorized() {
-  return Response.json(
-    { code: "CONFIG_ERROR", message: "转发渠道凭证未配置。" },
-    { status: 503 },
-  )
-}
-
-export async function relayJSON<T>(path: string, init: RequestInit = {}): Promise<Response> {
-  if (!relayToken) return unauthorized()
+export async function relayJSON<T>(request: Request, path: string, init: RequestInit = {}): Promise<Response> {
+	const token = request.headers.get("Authorization")?.replace(/^Bearer /, "")
+	if (!token) {
+		return Response.json({ code: "UNAUTHORIZED", message: "请先登录。" }, { status: 401 })
+	}
   const response = await fetch(`${apiBase}${path}`, {
     ...init,
     cache: "no-store",
     headers: {
-      Authorization: `Bearer ${relayToken}`,
+			Authorization: `Bearer ${token}`,
       ...(init.body ? { "Content-Type": "application/json" } : {}),
     },
   })
@@ -53,12 +25,15 @@ export async function relayJSON<T>(path: string, init: RequestInit = {}): Promis
   )
 }
 
-export async function relayStream(path: string): Promise<Response> {
-  if (!relayToken) return unauthorized()
+export async function relayStream(request: Request, path: string): Promise<Response> {
+	const token = request.headers.get("Authorization")?.replace(/^Bearer /, "")
+	if (!token) {
+		return Response.json({ code: "UNAUTHORIZED", message: "请先登录。" }, { status: 401 })
+	}
   const response = await fetch(`${apiBase}${path}`, {
     cache: "no-store",
     headers: {
-      Authorization: `Bearer ${relayToken}`,
+			Authorization: `Bearer ${token}`,
       Accept: "text/event-stream",
     },
   })

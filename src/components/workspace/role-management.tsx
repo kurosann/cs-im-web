@@ -7,7 +7,8 @@ import {
   Search,
   Trash2,
 } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -52,6 +53,13 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { TablePagination } from "@/components/ui/table-pagination"
+import {
+  IamApiError,
+  createRole,
+  deleteRole,
+  listRoles,
+  updateRole,
+} from "@/lib/iam"
 
 type RoleKind = "system" | "custom"
 type RoleStatus = "active" | "disabled"
@@ -69,34 +77,35 @@ type PermissionGroup = {
 }
 
 type Role = {
-  id: string
+  roleKey: string
   name: string
   description: string
   kind: RoleKind
   status: RoleStatus
   members: number
-  permissions: string[]
+  scopes: string[]
 }
 
 const permissionGroups: PermissionGroup[] = [
   {
-    id: "conversation",
-    title: "会话处理",
+    id: "platform",
+    title: "平台与团队",
     permissions: [
-      { id: "conversation:assigned", label: "处理分配给我的会话", description: "查看并回复分配给自己的客户会话。" },
-      { id: "conversation:tenant", label: "查看租户会话", description: "查看当前租户内全部会话。" },
-      { id: "conversation:assign", label: "分配和转接会话", description: "将会话分配给员工或 AI。" },
-      { id: "message:customer", label: "发送客户消息", description: "通过受限渠道上报客户消息。" },
-      { id: "message:agent", label: "发送客服消息", description: "以客服身份回复客户。" },
+      { id: "*", label: "全部权限", description: "拥有当前授权体系内的全部能力。" },
+      { id: "gateway:admin", label: "管理网关", description: "管理租户下的网关数据。" },
+      { id: "iam:token:manage", label: "管理凭证", description: "创建、轮换和禁用接入凭证。" },
+      { id: "iam:user:manage", label: "管理员工", description: "创建、禁用和重置员工账号。" },
+      { id: "iam:role:manage", label: "管理角色", description: "维护角色模板和权限组合。" },
+      { id: "relay:access", label: "转发渠道接入", description: "通过平台转发通道收发消息。" },
     ],
   },
   {
-    id: "platform",
-    title: "团队与平台",
+    id: "conversation",
+    title: "会话处理",
     permissions: [
-      { id: "iam:user:manage", label: "管理员工", description: "创建、禁用和重置员工账号。" },
-      { id: "iam:role:manage", label: "管理角色", description: "维护角色模板和权限组合。" },
-      { id: "settings:manage", label: "管理系统设置", description: "修改工作区和通知设置。" },
+      { id: "conversation:read", label: "查看会话", description: "查看当前租户内的客户会话。" },
+      { id: "conversation:manage", label: "管理会话", description: "分配、接管和关闭客户会话。" },
+      { id: "message:send:agent", label: "发送客服消息", description: "以客服身份回复客户。" },
     ],
   },
   {
@@ -104,6 +113,7 @@ const permissionGroups: PermissionGroup[] = [
     title: "渠道接入",
     permissions: [
       { id: "business-channel:manage", label: "管理业务渠道", description: "创建、禁用和轮换业务凭证。" },
+      { id: "channel:access", label: "业务渠道接入", description: "通过业务渠道上报客户消息和获取客服回复。" },
       { id: "relay-channel:manage", label: "管理转发渠道", description: "维护平台私有转发渠道。" },
       { id: "webhook:manage", label: "管理 Webhook", description: "配置事件订阅和回调地址。" },
     ],
@@ -138,77 +148,14 @@ const permissionGroups: PermissionGroup[] = [
   },
 ]
 
-const allPermissionIds = permissionGroups.flatMap((group) => group.permissions.map((permission) => permission.id))
-
-const initialRoles: Role[] = [
-  {
-    id: "role_admin",
-    name: "管理员",
-    description: "拥有租户配置、员工、渠道、会话和审计的完整管理能力。",
-    kind: "system",
-    status: "active",
-    members: 1,
-    permissions: allPermissionIds,
-  },
-  {
-    id: "role_supervisor",
-    name: "主管",
-    description: "查看租户会话，分配和接管会话，查看运营状态。",
-    kind: "system",
-    status: "active",
-    members: 2,
-    permissions: [
-      "conversation:assigned",
-      "conversation:tenant",
-      "conversation:assign",
-      "message:agent",
-      "message-log:read",
-    ],
-  },
-  {
-    id: "role_agent",
-    name: "客服",
-    description: "处理分配给自己的会话并发送人工回复。",
-    kind: "system",
-    status: "active",
-    members: 8,
-    permissions: ["conversation:assigned", "message:agent"],
-  },
-  {
-    id: "role_auditor",
-    name: "审计员",
-    description: "只读查看审计日志、消息日志和投递记录。",
-    kind: "system",
-    status: "active",
-    members: 1,
-    permissions: ["audit:read", "message-log:read"],
-  },
-  {
-    id: "role_developer",
-    name: "开发者",
-    description: "管理业务渠道、转发渠道、Webhook 和日志。",
-    kind: "system",
-    status: "active",
-    members: 1,
-    permissions: ["business-channel:manage", "relay-channel:manage", "webhook:manage", "message-log:read"],
-  },
-  {
-    id: "role_overseas_lead",
-    name: "海外客服组长",
-    description: "面向海外客服一组的受限主管模板。",
-    kind: "custom",
-    status: "active",
-    members: 3,
-    permissions: ["conversation:assigned", "conversation:assign", "message:agent", "message-log:read"],
-  },
-]
+const defaultRoleScopes = ["conversation:read", "message:send:agent"]
 
 function roleVariant(kind: RoleKind) {
   return kind === "system" ? "secondary" : "outline"
 }
 
 export function RoleManagement() {
-  const [roles, setRoles] = useState(initialRoles)
+  const [roles, setRoles] = useState<Role[]>([])
   const [keyword, setKeyword] = useState("")
   const [kind, setKind] = useState("all")
   const [status, setStatus] = useState("all")
@@ -218,10 +165,33 @@ export function RoleManagement() {
   const [editorPermissions, setEditorPermissions] = useState<string[]>([])
   const [createOpen, setCreateOpen] = useState(false)
   const [form, setForm] = useState({ name: "", description: "", status: "active" })
-  const [notice, setNotice] = useState("")
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
+
+  const showError = useCallback((error: unknown) => {
+    toast.error(error instanceof IamApiError ? error.message : "请求失败，请稍后重试。")
+  }, [])
+
+  const loadRoles = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      setRoles(await listRoles())
+    } catch (error) {
+      showError(error)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [showError])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadRoles()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [loadRoles])
 
   const visibleRoles = useMemo(() => roles.filter((role) => {
-    const matchesKeyword = [role.name, role.description, role.id].join(" ").toLowerCase().includes(keyword.trim().toLowerCase())
+    const matchesKeyword = [role.name, role.description, role.roleKey].join(" ").toLowerCase().includes(keyword.trim().toLowerCase())
     const matchesKind = kind === "all" || role.kind === kind
     const matchesStatus = status === "all" || role.status === status
     return matchesKeyword && matchesKind && matchesStatus
@@ -232,66 +202,107 @@ export function RoleManagement() {
     page * pageSize,
   )
 
-  function showNotice(message: string) {
-    setNotice(message)
-    window.setTimeout(() => setNotice(""), 2200)
-  }
-
   function openRole(role: Role) {
     setEditorRole(role)
-    setEditorPermissions([...role.permissions])
+    setEditorPermissions([...role.scopes])
   }
 
   function togglePermission(permissionId: string, checked: boolean) {
     setEditorPermissions((current) => checked ? [...current, permissionId] : current.filter((item) => item !== permissionId))
   }
 
-  function saveRole() {
-    if (!editorRole) return
-    setRoles((current) => current.map((role) => role.id === editorRole.id ? {
-      ...role,
-      permissions: editorPermissions,
-    } : role))
-    setEditorRole(null)
-    showNotice("角色权限已保存")
+  async function saveRole() {
+    if (!editorRole || isSaving) return
+    setIsSaving(true)
+    try {
+      const updated = await updateRole(editorRole.roleKey, {
+        name: editorRole.name,
+        description: editorRole.description,
+        status: editorRole.status,
+        scopes: editorPermissions,
+      })
+      setRoles((current) => current.map((role) => role.roleKey === updated.roleKey ? updated : role))
+      setEditorRole(null)
+      toast.success("角色权限已保存")
+    } catch (error) {
+      showError(error)
+    } finally {
+      setIsSaving(false)
+    }
   }
 
-  function createRole() {
-    if (!form.name.trim()) return
-    setRoles((current) => [{
-      id: `role_${Date.now()}`,
-      name: form.name.trim(),
-      description: form.description.trim() || "暂未填写角色说明。",
-      kind: "custom",
-      status: form.status as RoleStatus,
-      members: 0,
-      permissions: ["conversation:assigned", "message:agent"],
-    }, ...current])
-    setCreateOpen(false)
-    setForm({ name: "", description: "", status: "active" })
-    showNotice("角色已创建")
+  async function submitCreateRole() {
+    if (!form.name.trim() || isSaving) return
+    setIsSaving(true)
+    try {
+      const created = await createRole({
+        name: form.name.trim(),
+        description: form.description.trim() || "暂未填写角色说明。",
+        status: form.status as RoleStatus,
+        scopes: defaultRoleScopes,
+      })
+      setRoles((current) => [created, ...current])
+      setCreateOpen(false)
+      setForm({ name: "", description: "", status: "active" })
+      toast.success("角色已创建")
+    } catch (error) {
+      showError(error)
+    } finally {
+      setIsSaving(false)
+    }
   }
 
-  function duplicateRole(role: Role) {
-    setRoles((current) => [{
-      ...role,
-      id: `role_${Date.now()}`,
-      name: `${role.name} 副本`,
-      description: role.description,
-      kind: "custom",
-      status: "disabled",
-      members: 0,
-      permissions: [...role.permissions],
-    }, ...current])
-    showNotice("角色副本已创建")
+  async function duplicateRole(role: Role) {
+    if (isSaving) return
+    setIsSaving(true)
+    try {
+      const created = await createRole({
+        name: `${role.name} 副本`,
+        description: role.description,
+        status: "disabled",
+        scopes: role.scopes,
+      })
+      setRoles((current) => [created, ...current])
+      toast.success("角色副本已创建")
+    } catch (error) {
+      showError(error)
+    } finally {
+      setIsSaving(false)
+    }
   }
 
-  function toggleRoleStatus(id: string) {
-    setRoles((current) => current.map((role) => role.id === id ? {
-      ...role,
-      status: role.status === "active" ? "disabled" : "active",
-    } : role))
-    showNotice("角色状态已更新")
+  async function toggleRoleStatus(role: Role) {
+    if (isSaving) return
+    const status = role.status === "active" ? "disabled" : "active"
+    setIsSaving(true)
+    try {
+      const updated = await updateRole(role.roleKey, {
+        name: role.name,
+        description: role.description,
+        status,
+        scopes: role.scopes,
+      })
+      setRoles((current) => current.map((item) => item.roleKey === updated.roleKey ? updated : item))
+      toast.success("角色状态已更新")
+    } catch (error) {
+      showError(error)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  async function removeRole(role: Role) {
+    if (isSaving) return
+    setIsSaving(true)
+    try {
+      await deleteRole(role.roleKey)
+      setRoles((current) => current.filter((item) => item.roleKey !== role.roleKey))
+      toast.success("角色已删除")
+    } catch (error) {
+      showError(error)
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   return (
@@ -301,7 +312,7 @@ export function RoleManagement() {
           <h2 className="text-lg font-semibold">角色管理</h2>
           <p className="text-sm text-muted-foreground">用角色模板管理系统权限，避免向用户直接暴露权限项。</p>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
+        <Button disabled={isSaving} onClick={() => setCreateOpen(true)}>
           <Plus className="size-4" />
           创建角色
         </Button>
@@ -357,7 +368,7 @@ export function RoleManagement() {
             </TableHeader>
             <TableBody>
               {pagedRoles.map((role) => (
-                <TableRow key={role.id}>
+                <TableRow key={role.roleKey}>
                   <TableCell>
                     <p className="font-medium">{role.name}</p>
                     <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">{role.description}</p>
@@ -367,7 +378,7 @@ export function RoleManagement() {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium">{role.permissions.length}</span>
+                      <span className="text-sm font-medium">{role.scopes.length}</span>
                       <span className="text-xs text-muted-foreground">项能力</span>
                     </div>
                   </TableCell>
@@ -379,15 +390,15 @@ export function RoleManagement() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">
-                      <Button variant="ghost" size="sm" onClick={() => openRole(role)}>编辑权限</Button>
+                      <Button disabled={isSaving} variant="ghost" size="sm" onClick={() => openRole(role)}>编辑权限</Button>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="ghost" size="icon-sm" aria-label={`操作 ${role.name}`}><MoreHorizontal className="size-4" /></Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => duplicateRole(role)}><Copy className="size-3.5" />复制角色</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => toggleRoleStatus(role.id)}>{role.status === "active" ? "禁用角色" : "启用角色"}</DropdownMenuItem>
-                          <DropdownMenuItem variant="destructive" onClick={() => { setRoles((current) => current.filter((item) => item.id !== role.id)); showNotice("角色已删除") }}>
+                          <DropdownMenuItem onClick={() => void duplicateRole(role)}><Copy className="size-3.5" />复制角色</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => void toggleRoleStatus(role)}>{role.status === "active" ? "禁用角色" : "启用角色"}</DropdownMenuItem>
+                          <DropdownMenuItem variant="destructive" onClick={() => void removeRole(role)}>
                             <Trash2 className="size-3.5" />删除角色
                           </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -455,7 +466,7 @@ export function RoleManagement() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditorRole(null)}>取消</Button>
-            <Button onClick={saveRole}>保存权限</Button>
+            <Button disabled={isSaving} onClick={() => void saveRole()}>保存权限</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -478,12 +489,12 @@ export function RoleManagement() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>取消</Button>
-            <Button onClick={createRole}>创建</Button>
+            <Button disabled={isSaving} onClick={() => void submitCreateRole()}>创建</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {notice ? <p aria-live="polite" className="text-center text-sm text-muted-foreground">{notice}</p> : null}
+      {isLoading ? <p aria-live="polite" className="text-center text-sm text-muted-foreground">正在加载角色</p> : null}
     </div>
   )
 }

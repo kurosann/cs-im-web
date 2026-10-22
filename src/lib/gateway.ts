@@ -10,6 +10,7 @@ export type Conversation = {
   status: "open" | "closed"
   assignee?: string
   lastMessage?: string
+  lastMessageAt?: string
   unreadCount?: number
   replyStatus?: "replied" | "unreplied"
   createdAt: string
@@ -32,6 +33,7 @@ export type RelayMessage = {
   content?: { url: string; fileName?: string }
   status: string
   receivedAt: string
+  source?: { sentAt?: string }
 }
 
 export type RelayMessagePage = {
@@ -39,6 +41,13 @@ export type RelayMessagePage = {
   nextAfterSeq: number
   nextBeforeSeq: number
   hasMore: boolean
+}
+
+export type ChannelHistoryFilter = {
+  afterSeq?: number
+  beforeSeq?: number
+  limit?: number
+  order?: 'asc' | 'desc'
 }
 
 type ApiEnvelope<T> = {
@@ -105,6 +114,13 @@ export function markConversationRead(conversationId: string) {
   })
 }
 
+export function closeConversation(conversationId: string) {
+  return request<Conversation>(`/admin/v1/conversations/${encodeURIComponent(conversationId)}/close`, {
+    method: "POST",
+    body: JSON.stringify({ reason: "客服手动关闭" }),
+  })
+}
+
 async function relayRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const session = readSession()
   if (!session) throw new GatewayApiError(401, "UNAUTHORIZED", "请先登录。")
@@ -132,6 +148,23 @@ export function listRelayMessages(conversationId: string, beforeSeq?: number) {
   if (beforeSeq) params.set("beforeSeq", String(beforeSeq))
   return relayRequest<RelayMessagePage>(
     `/api/workbench/conversations/${encodeURIComponent(conversationId)}/messages?${params.toString()}`,
+  )
+}
+
+export function syncChannelHistory(conversationId: string, filter: ChannelHistoryFilter = {}) {
+  const params = new URLSearchParams()
+  if (filter.afterSeq) params.set("afterSeq", String(filter.afterSeq))
+  if (filter.beforeSeq) params.set("beforeSeq", String(filter.beforeSeq))
+  if (filter.limit) params.set("limit", String(filter.limit))
+  if (filter.order) params.set("order", filter.order)
+  const query = params.size ? `?${params.toString()}` : ''
+  return request<{ page: RelayMessagePage; createdCount: number }>(
+    `/admin/v1/conversations/${encodeURIComponent(conversationId)}/channel-history${query}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: [] }),
+    },
   )
 }
 

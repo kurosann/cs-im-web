@@ -3,6 +3,7 @@
 import {
   ArrowUpRight,
   Search,
+  X,
 } from "lucide-react"
 import Link from "next/link"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -34,6 +35,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   type Conversation,
   GatewayApiError,
+  closeConversation,
   listConversations,
 } from "@/lib/gateway"
 
@@ -90,6 +92,7 @@ export function ConversationsView() {
   const [conversations, setConversations] = useState<WorkbenchConversation[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [closingId, setClosingId] = useState<string | null>(null)
   const reloadRef = useRef<(() => void) | null>(null)
   const reloadTimerRef = useRef<number | null>(null)
 
@@ -156,7 +159,7 @@ export function ConversationsView() {
             if (!dataLine) continue
             try {
               const event = JSON.parse(dataLine.slice(6)) as { type?: string }
-              if (event.type === "conversation.created") {
+              if (["conversation.created", "conversation.closed"].includes(event.type ?? "")) {
                 if (reloadTimerRef.current) window.clearTimeout(reloadTimerRef.current)
                 reloadTimerRef.current = window.setTimeout(() => {
                   reloadTimerRef.current = null
@@ -195,6 +198,24 @@ export function ConversationsView() {
       updatedAt: formatTime(conversation.updatedAt),
     }))
   }, [displayConversations])
+
+  async function handleCloseConversation(conversationId: string) {
+    setClosingId(conversationId)
+    try {
+      await closeConversation(conversationId)
+      setConversations((current) => current.filter(
+        (item) => item.conversationId !== conversationId,
+      ))
+      setTotal((current) => Math.max(0, current - 1))
+      toast.success("会话已关闭")
+      void loadConversations()
+    } catch (error) {
+      const message = error instanceof GatewayApiError ? error.message : "关闭会话失败。"
+      toast.error(message)
+    } finally {
+      setClosingId(null)
+    }
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -315,6 +336,20 @@ export function ConversationsView() {
                           <ArrowUpRight data-icon="inline-end" className="size-3.5" />
                         </Link>
                       </Button>
+                      {conversation.status === "closed" ? null : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={closingId === conversation.conversationId}
+                          aria-label={`关闭 ${conversation.customerName || "未知客户"} 的会话`}
+                          onClick={() => {
+                            void handleCloseConversation(conversation.conversationId)
+                          }}
+                        >
+                          关闭
+                          <X data-icon="inline-end" className="size-3.5" />
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

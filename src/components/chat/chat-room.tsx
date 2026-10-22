@@ -11,6 +11,7 @@ import {
   MessageSquare,
   Sparkles,
   User,
+  X,
 } from "lucide-react"
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
@@ -23,6 +24,7 @@ import {
   knowledgeDocs,
   quickReplies,
   quickTranslations,
+  translateDraft,
   type ChatStatus,
 } from "@/data/mock/chat"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -86,6 +88,7 @@ import {
 import { readSession } from "@/lib/auth"
 import {
   type Conversation,
+  closeConversation,
   GatewayApiError,
   listConversations,
   listRelayMessages,
@@ -108,14 +111,19 @@ type ChatMessage = {
 }
 
 type Tone = "正式" | "友好" | "简洁" | "安抚"
-type TranslationLanguage = "en" | "zh"
+type TranslationLanguage = "en" | "es" | "zh"
+type SendMode = "original" | "translated"
 
 const tones: Tone[] = ["正式", "友好", "简洁", "安抚"]
+const sendModeLabels: Record<SendMode, string> = {
+  original: "发送原文",
+  translated: "发送译文",
+}
 const translationLanguages: Record<TranslationLanguage, string> = {
   en: "English",
+  es: "Español",
   zh: "中文",
 }
-
 const READ_POSITIONS_KEY = "cs-im-web.read-positions"
 
 function getReadPosition(userId: string | undefined, conversationId: string) {
@@ -205,8 +213,8 @@ function formatChatTime(value: string, includeSeconds = true) {
     year: date.getFullYear() === now.getFullYear() ? undefined : "numeric",
     month: "2-digit",
     day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
+    hour: date.getFullYear() === now.getFullYear() ? undefined : "2-digit",
+    minute: date.getFullYear() === now.getFullYear() ? undefined : "2-digit",
     ...(includeSeconds ? { second: "2-digit" } : {}),
     hour12: false,
   })
@@ -266,8 +274,8 @@ function ConversationList({
 }) {
   const sortedItems = useMemo(() => {
     return [...items].sort((left, right) => {
-      const leftTime = Date.parse(left.updatedAt)
-      const rightTime = Date.parse(right.updatedAt)
+      const leftTime = Date.parse(left.lastMessageAt ?? "")
+      const rightTime = Date.parse(right.lastMessageAt ?? "")
       if (Number.isNaN(leftTime) && Number.isNaN(rightTime)) return 0
       if (Number.isNaN(leftTime)) return 1
       if (Number.isNaN(rightTime)) return -1
@@ -318,13 +326,13 @@ function ConversationList({
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
-                        <p className="truncate text-sm font-semibold">{conversation.customerName || conversation.customerId}</p>
+                        <p className="min-w-0 flex-1 truncate text-sm font-semibold">{conversation.customerName || conversation.customerId}</p>
                         <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
                           {formatChatTime(conversation.updatedAt, false)}
                         </span>
                       </div>
                       <p className="mt-1 truncate text-xs text-muted-foreground">{conversation.channel || "未知渠道"}</p>
-                      <p className="mt-1.5 line-clamp-1 text-xs text-muted-foreground">{conversation.lastMessage || "暂无消息"}</p>
+                      <p className="mt-1.5 truncate text-xs text-muted-foreground">{conversation.lastMessage || "暂无消息"}</p>
                       <div className="mt-2 flex items-center gap-2">
                         <Badge variant={status.variant}>{status.label}</Badge>
                         <Badge variant={(conversation.replyStatus ?? "unreplied") === "unreplied" ? "warning" : "outline"}>
@@ -351,11 +359,13 @@ export function ChatRoom() {
   const [showTranslation, setShowTranslation] = useState(false)
   const [tone, setTone] = useState<Tone>("正式")
   const [translationLanguage, setTranslationLanguage] = useState<TranslationLanguage>("en")
+  const [sendMode, setSendMode] = useState<SendMode>("original")
   const [knowledgeBaseId, setKnowledgeBaseId] = useState<string | null>(null)
   const [loadingMessages, setLoadingMessages] = useState(false)
   const [sending, setSending] = useState(false)
   const [hasMore, setHasMore] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
+  const [closingConversation, setClosingConversation] = useState(false)
   const realtimeControllerRef = useRef<AbortController | null>(null)
   const activeConversationIdRef = useRef("")
   const pendingMessagesRef = useRef(new Map<string, RelayMessage[]>())
@@ -376,6 +386,11 @@ export function ChatRoom() {
 
     activeConversationIdRef.current = conversationId
     setActiveConversationId(conversationId)
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href)
+      url.searchParams.set("conversationId", conversationId)
+      window.history.replaceState(history.state, "", url.pathname + url.search)
+    }
     setMessages([])
     setHasMore(false)
     setLoadingMessages(true)
@@ -383,23 +398,23 @@ export function ChatRoom() {
 
   const loadConversations = useCallback(async () => {
     try {
-      const page = await listConversations({ page: 1, pageSize: 50 })
-      setConversations(page.items)
-      setActiveConversationId((current) => {
-        if (page.items.some((item) => item.conversationId === current)) return current
-
-        const requestedId = new URLSearchParams(window.location.search).get("conversationId")
-        if (requestedId && page.items.some((item) => item.conversationId === requestedId)) {
-          return requestedId
-        }
-
-        return page.items[0]?.conversationId ?? ""
-      })
+      const page = await listConversations({ page: 1, pageSize: 50, status: "open" })
+      setConversations(page.items.filter((item) => item.status === "open"))
+      const requestedId = new URLSearchParams(window.location.search).get("conversationId")
+      if (requestedId && page.items.some((item) => item.conversationId === requestedId)) {
+        selectConversation(requestedId)
+        return
+      }
+      setActiveConversationId((current) => (
+        page.items.some((item) => item.conversationId === current)
+          ? current
+          : page.items[0]?.conversationId ?? ""
+      ))
     } catch (error) {
       const message = error instanceof GatewayApiError ? error.message : "获取会话列表失败。"
       toast.error(message)
     }
-  }, [])
+  }, [selectConversation])
 
   const clearUnread = useCallback(async (conversationId: string) => {
     if (!conversationId) return
@@ -493,6 +508,9 @@ export function ChatRoom() {
               }
               void loadConversations()
             }
+            if (event.type === "conversation.closed") {
+              void loadConversations()
+            }
           } catch {
             continue
           }
@@ -501,18 +519,11 @@ export function ChatRoom() {
     }
 
     async function runRealtime() {
-      let hasShownError = false
-
       while (!controller.signal.aborted) {
         try {
           await connectRealtime()
-          hasShownError = false
-        } catch (error) {
+        } catch {
           if (controller.signal.aborted) return
-          if (error instanceof Error && !hasShownError) {
-            hasShownError = true
-            toast.error("实时连接已断开")
-          }
         }
 
         await new Promise((resolve) => window.setTimeout(resolve, 3000))
@@ -568,7 +579,7 @@ export function ChatRoom() {
       text: message.text ?? "",
       content: message.content,
       translated: quickTranslations[message.text ?? ""]?.[translationLanguage],
-      time: formatChatTime(message.receivedAt ?? ""),
+      time: formatChatTime(message.source?.sentAt ?? message.receivedAt ?? ""),
       seq: message.seq,
       senderName:
         message.sender?.role === "agent"
@@ -585,6 +596,11 @@ export function ChatRoom() {
   const readDividerId = firstUnreadIndex >= 0
     ? `read-divider-${activeConversationId}`
     : null
+  const draftTranslation = useMemo(
+    () => translateDraft(draft, translationLanguage),
+    [draft, translationLanguage],
+  )
+  const outboundDraft = sendMode === "translated" ? draftTranslation.text?.trim() : draft.trim()
 
   async function send(content: string) {
     const value = content.trim()
@@ -619,6 +635,28 @@ export function ChatRoom() {
     } catch {
       toast.error("复制消息失败。")
     }
+  }
+
+  async function closeActiveConversation() {
+    if (!activeConversationId || closingConversation) return
+    setClosingConversation(true)
+    try {
+      await closeConversation(activeConversationId)
+      setConversations((current) => current.filter(
+        (item) => item.conversationId !== activeConversationId && item.status === "open",
+      ))
+      toast.success("会话已关闭")
+      void loadConversations()
+    } catch (error) {
+      const message = error instanceof GatewayApiError ? error.message : "关闭会话失败。"
+      toast.error(message)
+    } finally {
+      setClosingConversation(false)
+    }
+  }
+
+  function sendOutbound() {
+    if (outboundDraft) void send(outboundDraft)
   }
 
   async function loadOlder() {
@@ -656,12 +694,12 @@ export function ChatRoom() {
               <div
                 aria-hidden={!showTranslation}
                 className={cn(
-	                  "absolute top-0 right-full transition-[clip-path] duration-200 ease-out",
-	                  !showTranslation && "pointer-events-none"
+                  "absolute top-0 right-full transition-[clip-path] duration-200 ease-out",
+                  !showTranslation && "pointer-events-none"
                 )}
-	                style={{
-	                  clipPath: showTranslation ? "inset(0 0 0 0)" : "inset(0 0 0 100%)",
-	                }}
+                style={{
+                  clipPath: showTranslation ? "inset(0 0 0 0)" : "inset(0 0 0 100%)",
+                }}
               >
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -706,6 +744,18 @@ export function ChatRoom() {
               >
                 <Languages className="size-3.5" />
                 翻译
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={!activeConversationId || closingConversation}
+                aria-label="关闭当前会话"
+                onClick={() => {
+                  void closeActiveConversation()
+                }}
+              >
+                关闭会话
+                <X className="size-3.5" />
               </Button>
             </div>
           </CardAction>
@@ -852,6 +902,16 @@ export function ChatRoom() {
         </CardContent>
 
         <CardContent className="px-3 pb-3 pt-0">
+          {draft.trim() ? (
+            <div className="mb-1.5 flex items-start gap-2 px-1 text-xs leading-5 text-muted-foreground">
+              <Languages className="mt-0.5 size-3.5 shrink-0" />
+              <p className="min-w-0 flex-1 line-clamp-2">
+                <span className="font-medium">{translationLanguages[translationLanguage]}</span>
+                <span className="mx-1.5">·</span>
+                {draftTranslation.text ?? "暂无可用翻译"}
+              </p>
+            </div>
+          ) : null}
           <InputGroup className="min-h-[96px] flex-col items-stretch rounded-2xl shadow-sm transition-shadow focus-within:shadow-md dark:bg-input/20">
             <InputGroupTextarea
               ref={draftTextareaRef}
@@ -860,7 +920,7 @@ export function ChatRoom() {
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault()
-                  void send(draft)
+                  sendOutbound()
                 }
               }}
               placeholder="输入回复..."
@@ -876,16 +936,49 @@ export function ChatRoom() {
               <span className="text-xs text-muted-foreground">
                 Enter 发送 · Shift + Enter 换行
               </span>
-              <InputGroupButton
-                size="icon-sm"
-                variant="default"
-                aria-label="发送回复"
-                onClick={() => void send(draft)}
-                disabled={!draft.trim() || sending || !activeConversationId}
-                className="size-8 rounded-full"
-              >
-                {sending ? <Spinner className="size-4" /> : <ArrowUpIcon className="size-4" />}
-              </InputGroupButton>
+              <div className="flex items-center gap-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <InputGroupButton
+                      size="sm"
+                      variant="ghost"
+                      aria-label="选择发送内容"
+                      className="h-8 rounded-full px-3"
+                    >
+                      {sendModeLabels[sendMode]}
+                      <ChevronDownIcon />
+                    </InputGroupButton>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-40">
+                    <DropdownMenuGroup>
+                      <DropdownMenuItem
+                        onSelect={() => setSendMode("original")}
+                      >
+                        <MessageSquare />
+                        发送原文
+                        {sendMode === "original" ? <CheckIcon className="ml-auto" /> : null}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() => setSendMode("translated")}
+                      >
+                        <Languages />
+                        发送译文
+                        {sendMode === "translated" ? <CheckIcon className="ml-auto" /> : null}
+                      </DropdownMenuItem>
+                    </DropdownMenuGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <InputGroupButton
+                  size="icon-sm"
+                  variant="default"
+                  aria-label="发送回复"
+                  onClick={sendOutbound}
+                  disabled={!outboundDraft || sending || !activeConversationId}
+                  className="size-9 rounded-full"
+                >
+                  {sending ? <Spinner className="size-4" /> : <ArrowUpIcon className="size-4" />}
+                </InputGroupButton>
+              </div>
             </InputGroupAddon>
           </InputGroup>
         </CardContent>
@@ -987,6 +1080,7 @@ export function ChatRoom() {
           </div>
         </DialogContent>
       </Dialog>
+
     </div>
   )
 }
