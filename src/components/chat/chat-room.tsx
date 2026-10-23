@@ -9,6 +9,7 @@ import {
   Headphones,
   Languages,
   MessageSquare,
+  RotateCcw,
   Sparkles,
   User,
   X,
@@ -93,6 +94,7 @@ import {
   listConversations,
   listRelayMessages,
   markConversationRead,
+  reopenConversation,
   sendRelayMessage,
   type RelayMessage,
 } from "@/lib/gateway"
@@ -213,11 +215,16 @@ function formatChatTime(value: string, includeSeconds = true) {
     year: date.getFullYear() === now.getFullYear() ? undefined : "numeric",
     month: "2-digit",
     day: "2-digit",
-    hour: date.getFullYear() === now.getFullYear() ? undefined : "2-digit",
-    minute: date.getFullYear() === now.getFullYear() ? undefined : "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
     ...(includeSeconds ? { second: "2-digit" } : {}),
     hour12: false,
   })
+}
+
+function messageTimestamp(message: RelayMessage) {
+  const time = Date.parse(message.source?.sentAt ?? message.receivedAt ?? "")
+  return Number.isNaN(time) ? 0 : time
 }
 
 const statusLabels: Record<ChatStatus, { label: string; variant: "destructive" | "secondary" | "outline" }> = {
@@ -284,7 +291,7 @@ function ConversationList({
   }, [items])
 
   return (
-    <Card className="flex h-full flex-col rounded-xl">
+    <Card className="flex h-full w-full max-w-[300px] flex-col rounded-xl xl:w-[300px]">
       <CardHeader className="pb-1">
         <CardTitle className="flex items-center gap-2 text-base">
           <MessageSquare className="size-4" />
@@ -293,7 +300,7 @@ function ConversationList({
       </CardHeader>
       <CardContent className="min-h-0 flex-1 px-0 pb-0">
         <ScrollArea className="h-80 sm:h-[560px] xl:h-full">
-          <div className="px-3 pb-3">
+          <div className="w-full min-w-0 px-3 pb-3">
             {sortedItems.map((conversation) => {
               const active = conversation.conversationId === activeId
               const status = conversation.status === "closed"
@@ -306,7 +313,7 @@ function ConversationList({
                   type="button"
                   onClick={() => onSelect(conversation.conversationId)}
                   className={cn(
-                    "w-full rounded-lg p-3 text-left transition-colors hover:bg-muted/60",
+                    "block w-full min-w-0 overflow-hidden rounded-lg p-3 text-left transition-colors hover:bg-muted/60",
                     active && "bg-sidebar-border"
                   )}
                 >
@@ -328,7 +335,7 @@ function ConversationList({
                       <div className="flex items-center justify-between gap-2">
                         <p className="min-w-0 flex-1 truncate text-sm font-semibold">{conversation.customerName || conversation.customerId}</p>
                         <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
-                          {formatChatTime(conversation.updatedAt, false)}
+                          {formatChatTime(conversation.lastMessageAt ?? conversation.updatedAt, false)}
                         </span>
                       </div>
                       <p className="mt-1 truncate text-xs text-muted-foreground">{conversation.channel || "未知渠道"}</p>
@@ -372,6 +379,7 @@ export function ChatRoom() {
   const draftTextareaRef = useRef<HTMLTextAreaElement | null>(null)
 
   const conversation = conversations.find((item) => item.conversationId === activeConversationId)
+  const activeConversationClosed = conversation?.status === "closed"
   const activeKnowledgeBase = knowledgeBases.find((item) => item.id === knowledgeBaseId)
   const activeDocs = knowledgeDocs.filter((item) => item.baseId === knowledgeBaseId)
   const session = readSession()
@@ -398,8 +406,7 @@ export function ChatRoom() {
 
   const loadConversations = useCallback(async () => {
     try {
-      const page = await listConversations({ page: 1, pageSize: 50, status: "open" })
-      setConversations(page.items.filter((item) => item.status === "open"))
+      const page = await listConversations({ page: 1, pageSize: 50, status: "all" })
       const requestedId = new URLSearchParams(window.location.search).get("conversationId")
       if (requestedId && page.items.some((item) => item.conversationId === requestedId)) {
         selectConversation(requestedId)
@@ -436,7 +443,7 @@ export function ChatRoom() {
       incoming.forEach((item) => {
         if (item.messageId) messageMap.set(item.messageId, item)
       })
-      return [...messageMap.values()].sort((left, right) => left.seq - right.seq)
+      return [...messageMap.values()].sort((left, right) => messageTimestamp(right) - messageTimestamp(left))
     })
   }, [])
 
@@ -509,6 +516,9 @@ export function ChatRoom() {
               void loadConversations()
             }
             if (event.type === "conversation.closed") {
+              void loadConversations()
+            }
+            if (event.type === "conversation.reopened") {
               void loadConversations()
             }
           } catch {
@@ -642,13 +652,35 @@ export function ChatRoom() {
     setClosingConversation(true)
     try {
       await closeConversation(activeConversationId)
-      setConversations((current) => current.filter(
-        (item) => item.conversationId !== activeConversationId && item.status === "open",
-      ))
+      setConversations((current) => current.map((item) => (
+        item.conversationId === activeConversationId
+          ? { ...item, status: "closed" as const }
+          : item
+      )))
       toast.success("会话已关闭")
       void loadConversations()
     } catch (error) {
       const message = error instanceof GatewayApiError ? error.message : "关闭会话失败。"
+      toast.error(message)
+    } finally {
+      setClosingConversation(false)
+    }
+  }
+
+  async function reopenActiveConversation() {
+    if (!activeConversationId || closingConversation) return
+    setClosingConversation(true)
+    try {
+      const conversation = await reopenConversation(activeConversationId)
+      setConversations((current) => current.map((item) => (
+        item.conversationId === activeConversationId
+          ? { ...item, ...conversation, customerName: item.customerName || conversation.customerId }
+          : item
+      )))
+      toast.success("会话已重新打开")
+      void loadConversations()
+    } catch (error) {
+      const message = error instanceof GatewayApiError ? error.message : "重新打开会话失败。"
       toast.error(message)
     } finally {
       setClosingConversation(false)
@@ -660,7 +692,7 @@ export function ChatRoom() {
   }
 
   async function loadOlder() {
-    const oldestSeq = messages[0]?.seq ?? 0
+    const oldestSeq = messages[messages.length - 1]?.seq ?? 0
     if (!hasMore || !oldestSeq || loadingMessages || !activeConversationId) return
     setLoadingMessages(true)
     try {
@@ -746,16 +778,14 @@ export function ChatRoom() {
                 翻译
               </Button>
               <Button
-                variant="ghost"
+                variant={!activeConversationClosed ? "ghost" : "outline"}
                 size="sm"
                 disabled={!activeConversationId || closingConversation}
-                aria-label="关闭当前会话"
-                onClick={() => {
-                  void closeActiveConversation()
-                }}
+                aria-label={!activeConversationClosed ? "关闭当前会话" : "重新打开当前会话"}
+                onClick={() => void (!activeConversationClosed ? closeActiveConversation() : reopenActiveConversation())}
               >
-                关闭会话
-                <X className="size-3.5" />
+                {!activeConversationClosed ? "关闭会话" : "重新打开会话"}
+                {!activeConversationClosed ? <X className="size-3.5" /> : <RotateCcw className="size-3.5" />}
               </Button>
             </div>
           </CardAction>
