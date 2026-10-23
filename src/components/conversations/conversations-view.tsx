@@ -2,6 +2,7 @@
 
 import {
   ArrowUpRight,
+  RotateCcw,
   Search,
   X,
 } from "lucide-react"
@@ -37,6 +38,7 @@ import {
   GatewayApiError,
   closeConversation,
   listConversations,
+  reopenConversation,
 } from "@/lib/gateway"
 
 const filters: Array<{ value: "all" | "open" | "closed"; label: string }> = [
@@ -93,6 +95,7 @@ export function ConversationsView() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [closingId, setClosingId] = useState<string | null>(null)
+  const [reopeningId, setReopeningId] = useState<string | null>(null)
   const reloadRef = useRef<(() => void) | null>(null)
   const reloadTimerRef = useRef<number | null>(null)
 
@@ -217,6 +220,25 @@ export function ConversationsView() {
     }
   }
 
+  async function handleReopenConversation(conversationId: string) {
+    setReopeningId(conversationId)
+    try {
+      const conversation = await reopenConversation(conversationId)
+      setConversations((current) => current.map((item) => (
+        item.conversationId === conversationId
+          ? { ...item, ...conversation, status: conversationStatus(conversation) }
+          : item
+      )))
+      toast.success("会话已重新打开")
+      void loadConversations()
+    } catch (error) {
+      const message = error instanceof GatewayApiError ? error.message : "重新打开会话失败。"
+      toast.error(message)
+    } finally {
+      setReopeningId(null)
+    }
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <Card>
@@ -336,7 +358,20 @@ export function ConversationsView() {
                           <ArrowUpRight data-icon="inline-end" className="size-3.5" />
                         </Link>
                       </Button>
-                      {conversation.status === "closed" ? null : (
+                      {conversation.status === "closed" ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={reopeningId === conversation.conversationId}
+                          aria-label={`重新打开 ${conversation.customerName || "未知客户"} 的会话`}
+                          onClick={() => {
+                            void handleReopenConversation(conversation.conversationId)
+                          }}
+                        >
+                          重新打开
+                          <RotateCcw data-icon="inline-end" className="size-3.5" />
+                        </Button>
+                      ) : (
                         <Button
                           variant="ghost"
                           size="sm"

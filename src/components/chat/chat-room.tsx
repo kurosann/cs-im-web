@@ -407,6 +407,7 @@ export function ChatRoom() {
   const loadConversations = useCallback(async () => {
     try {
       const page = await listConversations({ page: 1, pageSize: 50, status: "all" })
+      setConversations(page.items)
       const requestedId = new URLSearchParams(window.location.search).get("conversationId")
       if (requestedId && page.items.some((item) => item.conversationId === requestedId)) {
         selectConversation(requestedId)
@@ -776,16 +777,6 @@ export function ChatRoom() {
               >
                 <Languages className="size-3.5" />
                 翻译
-              </Button>
-              <Button
-                variant={!activeConversationClosed ? "ghost" : "outline"}
-                size="sm"
-                disabled={!activeConversationId || closingConversation}
-                aria-label={!activeConversationClosed ? "关闭当前会话" : "重新打开当前会话"}
-                onClick={() => void (!activeConversationClosed ? closeActiveConversation() : reopenActiveConversation())}
-              >
-                {!activeConversationClosed ? "关闭会话" : "重新打开会话"}
-                {!activeConversationClosed ? <X className="size-3.5" /> : <RotateCcw className="size-3.5" />}
               </Button>
             </div>
           </CardAction>
