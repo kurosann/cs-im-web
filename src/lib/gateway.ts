@@ -121,6 +121,12 @@ export function closeConversation(conversationId: string) {
   })
 }
 
+export function reopenConversation(conversationId: string) {
+  return request<Conversation>(`/admin/v1/conversations/${encodeURIComponent(conversationId)}/reopen`, {
+    method: "POST",
+  })
+}
+
 async function relayRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const session = readSession()
   if (!session) throw new GatewayApiError(401, "UNAUTHORIZED", "请先登录。")
