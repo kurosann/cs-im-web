@@ -191,7 +191,7 @@ AI 客服员工是独立可分配对象，支持基础模式和专业模式：
 - 不请求真实翻译服务；
 - 不连接真实消息网关；
 - 不写入真实数据库；
-- 登录默认依赖 `/api/v1/auth/login`，纯前端页面验收可注入本地 mock session。
+- 管理面登录默认依赖 `/auth/v1/management/login`，纯前端页面验收可注入本地 mock session。
 
 后续接入真实后端时，保持页面和组件不变，将 Mock 数据替换为 Repository / API client 即可。
 

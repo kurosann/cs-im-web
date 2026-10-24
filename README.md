@@ -82,7 +82,7 @@ pnpm dev
 
 ## 当前边界
 
-- 登录通过 `POST /api/v1/auth/login`，默认转发到 `CS_IM_API_BASE`（`http://127.0.0.1:8080`）；注册由管理员在 IAM 中开通，前端不再提供自主注册。
+- 管理面登录通过 `POST /auth/v1/management/login`，默认转发到 `CS_IM_API_BASE`（`http://127.0.0.1:8080`）；注册由管理员在 IAM 中开通，前端不再提供自主注册。
 - 纯前端页面验收可以注入本地 mock session，见 `docs/scripts/validation/verify_v2_workbench.py`。
 - 渠道接入页在有 cs-im-server 时读取真实 IAM Token 和转发渠道；后端不可用时回退示例数据。其余业务数据仍为前端 Mock：会话、消息、AI 建议、翻译、摘要、分配规则和提醒不写入真实数据库。
 - V2b 的 AI 建议、翻译、摘要、情绪风险和知识命中为 Mock 交互，不调用真实模型、翻译服务或消息网关。

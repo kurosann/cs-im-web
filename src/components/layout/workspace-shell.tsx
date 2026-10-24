@@ -446,10 +446,10 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
         </Sidebar>
 
         <SidebarInset>
-          <header className="sticky top-0 z-20 h-14 border-b border-border bg-background/90 backdrop-blur">
+          <header className="sticky top-0 z-20 h-14 shrink-0 border-b border-border bg-background/90 backdrop-blur">
             <div className="flex h-full items-center justify-between gap-3 px-4 sm:px-6">
               <div className="flex min-w-0 items-center gap-2 xl:gap-4">
-                <SidebarTrigger className="hidden md:inline-flex" />
+                <SidebarTrigger className="inline-flex size-9 md:size-7" />
                 <div className="min-w-0">
                   {pageMeta.eyebrow ? (
                     <p className="text-[11px] font-medium tracking-[0.14em] text-muted-foreground">
@@ -471,7 +471,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
             </div>
           </header>
 
-          <main className="mx-auto w-full max-w-[1440px] px-4 py-4 sm:px-6 sm:py-5">
+          <main className="mx-auto min-h-0 w-full flex-1 max-w-[1440px] px-3 py-3 sm:px-6 sm:py-5">
             {children}
           </main>
         </SidebarInset>

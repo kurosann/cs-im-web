@@ -48,7 +48,7 @@ export async function login(
   remember = true,
 ): Promise<LoginResult> {
   try {
-    const response = await fetch("/api/v1/auth/login", {
+    const response = await fetch("/auth/v1/management/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ identifier, password }),
@@ -79,7 +79,7 @@ export async function login(
 
 export async function register(input: RegisterInput, remember = true): Promise<LoginResult> {
   try {
-    const response = await fetch("/api/v1/auth/register", {
+    const response = await fetch("/auth/v1/management/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
@@ -111,7 +111,7 @@ export async function register(input: RegisterInput, remember = true): Promise<L
 export async function logout(): Promise<void> {
   const session = readSession()
   if (session?.token) {
-    await fetch("/api/v1/auth/logout", {
+      await fetch("/auth/v1/management/logout", {
       method: "POST",
       headers: { Authorization: `Bearer ${session.token}` },
     }).catch(() => undefined)
@@ -129,7 +129,7 @@ export async function changeOwnPassword(input: {
   }
 
   try {
-    const response = await fetch("/api/v1/auth/password", {
+    const response = await fetch("/auth/v1/management/password", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

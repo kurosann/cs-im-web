@@ -83,7 +83,7 @@ type Role = {
   kind: RoleKind
   status: RoleStatus
   members: number
-  scopes: string[]
+  scopes?: string[]
 }
 
 const permissionGroups: PermissionGroup[] = [
@@ -166,6 +166,7 @@ export function RoleManagement() {
   const [createOpen, setCreateOpen] = useState(false)
   const [form, setForm] = useState({ name: "", description: "", status: "active" })
   const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState("")
   const [isSaving, setIsSaving] = useState(false)
 
   const showError = useCallback((error: unknown) => {
@@ -176,6 +177,7 @@ export function RoleManagement() {
     setIsLoading(true)
     try {
       setRoles(await listRoles())
+      setLoadError("")
     } catch (error) {
       showError(error)
     } finally {
@@ -204,7 +206,7 @@ export function RoleManagement() {
 
   function openRole(role: Role) {
     setEditorRole(role)
-    setEditorPermissions([...role.scopes])
+    setEditorPermissions([...(role.scopes ?? [])])
   }
 
   function togglePermission(permissionId: string, checked: boolean) {
@@ -260,7 +262,7 @@ export function RoleManagement() {
         name: `${role.name} 副本`,
         description: role.description,
         status: "disabled",
-        scopes: role.scopes,
+        scopes: role.scopes ?? [],
       })
       setRoles((current) => [created, ...current])
       toast.success("角色副本已创建")
@@ -280,7 +282,7 @@ export function RoleManagement() {
         name: role.name,
         description: role.description,
         status,
-        scopes: role.scopes,
+        scopes: role.scopes ?? [],
       })
       setRoles((current) => current.map((item) => item.roleKey === updated.roleKey ? updated : item))
       toast.success("角色状态已更新")
@@ -317,6 +319,7 @@ export function RoleManagement() {
           创建角色
         </Button>
       </div>
+      {loadError ? <p className="text-sm text-destructive">{loadError}</p> : null}
 
       <section className="grid gap-4 sm:grid-cols-3">
         <Card><CardHeader><CardDescription>角色总数</CardDescription><CardTitle className="text-2xl">{roles.length}</CardTitle></CardHeader></Card>
@@ -355,7 +358,13 @@ export function RoleManagement() {
             </div>
           </div>
 
-          <Table>
+          <Table
+            loading={isLoading}
+            loadingMode={pagedRoles.length === 0 ? "visible" : "silent"}
+            loadingLabel="正在加载角色…"
+            refreshing={isLoading}
+            onRefresh={loadRoles}
+          >
             <TableHeader>
               <TableRow>
                 <TableHead>角色</TableHead>
@@ -378,7 +387,7 @@ export function RoleManagement() {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium">{role.scopes.length}</span>
+                      <span className="text-sm font-medium">{role.scopes?.length ?? 0}</span>
                       <span className="text-xs text-muted-foreground">项能力</span>
                     </div>
                   </TableCell>

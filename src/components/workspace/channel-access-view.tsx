@@ -4,8 +4,6 @@ import {
   Copy,
   MoreHorizontal,
   Plus,
-  RefreshCw,
-  RotateCcw,
   Search,
 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
@@ -51,18 +49,19 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { TablePagination } from "@/components/ui/table-pagination"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
-  type AccountToken,
+  type ChannelCredential,
+  listChannelCredentials,
+  issueChannelCredential,
+  rotateChannelCredential,
+  setChannelCredentialStatus,
+  deleteChannelCredential,
+} from "@/lib/iam"
+import {
   type RelayChannel as RelayChannelRecord,
   createRelayChannel,
-  issueAccountToken,
-  listAccountTokens,
   listRelayChannels,
-  rotateAccountToken,
-  setAccountTokenStatus,
   setRelayChannelStatus,
-  testRelayChannel,
 } from "@/lib/api/cs-im"
 
 type BusinessChannelStatus = "active" | "expiring" | "disabled" | "revoked"
@@ -159,7 +158,7 @@ function isExpiring(expiresAt?: string | null) {
   return date.getTime() - Date.now() <= thirtyDays
 }
 
-function tokenToBusinessChannel(token: AccountToken): BusinessChannel {
+function credentialToBusinessChannel(token: ChannelCredential): BusinessChannel {
   const status: BusinessChannelStatus =
     token.status === "revoked"
       ? "revoked"
@@ -170,9 +169,9 @@ function tokenToBusinessChannel(token: AccountToken): BusinessChannel {
           : "active"
 
   return {
-    id: token.tokenKey,
-    name: token.name || token.accountKey,
-    appId: token.accountKey,
+    id: token.appId,
+    name: token.name,
+    appId: token.appId,
     status,
     scopes: token.scopes ?? [],
     expiresAt: formatDate(token.expiresAt),
@@ -248,42 +247,40 @@ function EmptyRows({ colSpan, title, description }: { colSpan: number; title: st
 export function ChannelAccessView({ notice }: { notice: (message: string) => void }) {
   const [businessChannels, setBusinessChannels] = useState(initialBusinessChannels)
   const [relayChannels, setRelayChannels] = useState(initialRelayChannels)
-  const [keyword, setKeyword] = useState("")
-  const [status, setStatus] = useState("all")
-  const [tab, setTab] = useState("business")
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(10)
+  const [businessKeyword, setBusinessKeyword] = useState("")
+  const [businessStatus, setBusinessStatus] = useState("all")
+  const [businessPage, setBusinessPage] = useState(1)
+  const [businessPageSize, setBusinessPageSize] = useState(10)
+  const [relayKeyword, setRelayKeyword] = useState("")
+  const [relayStatus, setRelayStatus] = useState("all")
+  const [relayPage, setRelayPage] = useState(1)
+  const [relayPageSize, setRelayPageSize] = useState(10)
   const [createBusinessOpen, setCreateBusinessOpen] = useState(false)
   const [createRelayOpen, setCreateRelayOpen] = useState(false)
   const [issuedCredential, setIssuedCredential] = useState<{ appId: string; secret: string } | null>(null)
   const [businessForm, setBusinessForm] = useState({ name: "", accountKey: "", expiresAt: "" })
   const [relayForm, setRelayForm] = useState({ name: "", type: "webhook", endpoint: "" })
   const [backendState, setBackendState] = useState<"loading" | "online" | "offline">("loading")
-  const [backendError, setBackendError] = useState("")
   const [submitting, setSubmitting] = useState(false)
 
   const loadChannels = useCallback(async () => {
     try {
       const [tokens, relay] = await Promise.all([
-        listAccountTokens(),
+        listChannelCredentials(),
         listRelayChannels(),
       ])
       setBusinessChannels(
-        tokens
-          .filter((token) => token.kind === "business" || !token.kind)
-          .map(tokenToBusinessChannel),
+        tokens.map(credentialToBusinessChannel),
       )
       setRelayChannels(relay.map(relayToChannel))
       setBackendState("online")
-    } catch (error) {
+    } catch {
       setBackendState("offline")
-      setBackendError(error instanceof Error ? error.message : "无法连接 cs-im-server")
     }
   }, [])
 
   async function refreshChannels() {
     setBackendState("loading")
-    setBackendError("")
     await loadChannels()
   }
 
@@ -298,28 +295,28 @@ export function ChannelAccessView({ notice }: { notice: (message: string) => voi
     const matchesKeyword = [channel.name, channel.appId, channel.scopes.join(" ")]
       .join(" ")
       .toLowerCase()
-      .includes(keyword.trim().toLowerCase())
-    const matchesStatus = status === "all" || channel.status === status
+      .includes(businessKeyword.trim().toLowerCase())
+    const matchesStatus = businessStatus === "all" || channel.status === businessStatus
     return matchesKeyword && matchesStatus
-  }), [businessChannels, keyword, status])
+  }), [businessChannels, businessKeyword, businessStatus])
 
   const visibleRelay = useMemo(() => relayChannels.filter((channel) => {
     const matchesKeyword = [channel.name, channel.type, channel.target]
       .join(" ")
       .toLowerCase()
-      .includes(keyword.trim().toLowerCase())
-    const matchesStatus = status === "all" || channel.status === status
+      .includes(relayKeyword.trim().toLowerCase())
+    const matchesStatus = relayStatus === "all" || channel.status === relayStatus
     return matchesKeyword && matchesStatus
-  }), [relayChannels, keyword, status])
+  }), [relayChannels, relayKeyword, relayStatus])
 
   const pagedBusiness = visibleBusiness.slice(
-    (page - 1) * pageSize,
-    page * pageSize,
+    (businessPage - 1) * businessPageSize,
+    businessPage * businessPageSize,
   )
 
   const pagedRelay = visibleRelay.slice(
-    (page - 1) * pageSize,
-    page * pageSize,
+    (relayPage - 1) * relayPageSize,
+    relayPage * relayPageSize,
   )
 
   function openCreateBusiness() {
@@ -339,18 +336,16 @@ export function ChannelAccessView({ notice }: { notice: (message: string) => voi
 
     setSubmitting(true)
     try {
-      const result = await issueAccountToken({
-        accountKey: businessForm.accountKey.trim(),
+      const result = await issueChannelCredential({
+        appId: businessForm.accountKey.trim(),
         name: businessForm.name.trim(),
-        kind: "business",
-        scopes: ["channel:access"],
         expiresAt: businessForm.expiresAt
           ? new Date(`${businessForm.expiresAt}T23:59:59Z`).toISOString()
           : undefined,
       })
       setCreateBusinessOpen(false)
       setIssuedCredential({
-        appId: result.token.accountKey,
+        appId: result.credential.appId,
         secret: result.secret,
       })
       notice("业务渠道已创建，SecretKey 只显示一次")
@@ -364,9 +359,9 @@ export function ChannelAccessView({ notice }: { notice: (message: string) => voi
 
   async function rotateBusinessSecret(id: string) {
     try {
-      const result = await rotateAccountToken(id)
+      const result = await rotateChannelCredential(id)
       setIssuedCredential({
-        appId: result.token.accountKey,
+        appId: result.credential.appId,
         secret: result.secret,
       })
       notice("旧 SecretKey 已失效")
@@ -378,11 +373,21 @@ export function ChannelAccessView({ notice }: { notice: (message: string) => voi
 
   async function toggleBusinessStatus(id: string, next: "active" | "disabled") {
     try {
-      await setAccountTokenStatus(id, next)
+      await setChannelCredentialStatus(id, next)
       notice("业务凭证状态已更新")
       await loadChannels()
     } catch (error) {
       notice(error instanceof Error ? `更新失败：${error.message}` : "更新失败")
+    }
+  }
+
+  async function deleteBusinessChannel(id: string) {
+    try {
+      await deleteChannelCredential(id)
+      notice("业务渠道已删除")
+      await loadChannels()
+    } catch (error) {
+      notice(error instanceof Error ? `删除失败：${error.message}` : "删除失败")
     }
   }
 
@@ -423,152 +428,145 @@ export function ChannelAccessView({ notice }: { notice: (message: string) => voi
     }
   }
 
-  async function handleTestRelayChannel(id: string) {
-    try {
-      await testRelayChannel(id)
-      notice("转发渠道测试完成")
-      await loadChannels()
-    } catch (error) {
-      notice(error instanceof Error ? `测试失败：${error.message}` : "测试失败")
-    }
-  }
-
   return (
     <>
-      <section className="flex flex-wrap items-center justify-end gap-2">
-        <Badge variant={backendState === "online" ? "secondary" : "outline"}>
-          {backendState === "loading" ? "连接中" : backendState === "online" ? "已连接 cs-im-server" : "示例数据"}
-        </Badge>
-        <Button variant="outline" size="sm" onClick={() => void refreshChannels()} disabled={backendState === "loading"}>
-          <RefreshCw className="size-4" />
-          刷新
-        </Button>
-      </section>
-
-      {backendState === "offline" ? (
-        <p className="text-sm text-muted-foreground">
-          cs-im-server 未连接，当前显示本地示例数据。{backendError ? ` ${backendError}` : ""}
-        </p>
-      ) : null}
-
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Card><CardHeader><CardDescription>业务凭证</CardDescription><CardTitle className="text-2xl">{businessChannels.length}</CardTitle></CardHeader></Card>
+        <Card><CardHeader><CardDescription>业务渠道</CardDescription><CardTitle className="text-2xl">{businessChannels.length}</CardTitle></CardHeader></Card>
         <Card><CardHeader><CardDescription>正常凭证</CardDescription><CardTitle className="text-2xl">{businessChannels.filter((item) => item.status === "active").length}</CardTitle></CardHeader></Card>
         <Card><CardHeader><CardDescription>即将到期</CardDescription><CardTitle className="text-2xl">{businessChannels.filter((item) => item.status === "expiring").length}</CardTitle></CardHeader></Card>
         <Card><CardHeader><CardDescription>转发渠道</CardDescription><CardTitle className="text-2xl">{relayChannels.length}</CardTitle></CardHeader></Card>
       </section>
 
-      <Tabs value={tab} onValueChange={(value) => { setPage(1); setStatus("all"); setTab(value) }}>
-        <TabsList><TabsTrigger value="business">业务渠道</TabsTrigger><TabsTrigger value="relay">转发渠道</TabsTrigger></TabsList>
-
-        <TabsContent value="business" className="mt-4">
-          <Card>
-            <CardHeader className="flex-row flex-wrap items-start justify-between gap-3">
-              <div>
-                <CardTitle>业务渠道凭证</CardTitle>
-                <CardDescription>业务后端只能发送客户消息和接收客服消息。</CardDescription>
-              </div>
-              <Button onClick={openCreateBusiness}><Plus className="size-4" />创建业务渠道</Button>
-            </CardHeader>
-            <CardContent className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>业务渠道</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Table
+            loading={backendState === "loading"}
+            loadingMode={pagedBusiness.length === 0 ? "visible" : "silent"}
+            loadingLabel="正在加载业务渠道…"
+            refreshing={backendState === "loading"}
+            onRefresh={refreshChannels}
+            tableFilters={(
               <FilterBar
-                keyword={keyword}
-                onKeywordChange={(value) => { setPage(1); setKeyword(value) }}
-                selects={[{ value: status, onChange: (value) => { setPage(1); setStatus(value) }, placeholder: "状态", options: [{ value: "all", label: "全部状态" }, ...Object.entries(businessStatusLabels).map(([value, label]) => ({ value, label }))] }]}
+                keyword={businessKeyword}
+                onKeywordChange={(value) => { setBusinessPage(1); setBusinessKeyword(value) }}
+                selects={[{ value: businessStatus, onChange: (value) => { setBusinessPage(1); setBusinessStatus(value) }, placeholder: "状态", options: [{ value: "all", label: "全部状态" }, ...Object.entries(businessStatusLabels).map(([value, label]) => ({ value, label }))] }]}
               />
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>渠道</TableHead><TableHead>AppID</TableHead><TableHead>Scope</TableHead><TableHead>状态</TableHead><TableHead>到期时间</TableHead><TableHead>最近使用</TableHead><TableHead className="text-right">操作</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {pagedBusiness.map((channel) => (
-                    <TableRow key={channel.id}>
-                      <TableCell className="font-medium">{channel.name}</TableCell>
-                      <TableCell className="font-mono text-xs">{channel.appId}</TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">{channel.scopes.join(" · ") || "—"}</TableCell>
-                      <TableCell><Badge variant={statusVariant(channel.status)}>{businessStatusLabels[channel.status]}</Badge></TableCell>
-                      <TableCell className="text-muted-foreground">{channel.expiresAt}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{channel.lastUsedAt}</TableCell>
-                      <TableCell className="text-right">
-                        {channel.status === "revoked" ? (
-                          <span className="text-xs text-muted-foreground">已轮换</span>
-                        ) : (
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild><Button variant="ghost" size="icon-sm" aria-label={`操作 ${channel.name}`}><MoreHorizontal className="size-4" /></Button></DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => void rotateBusinessSecret(channel.id)}><RotateCcw className="size-3.5" />轮换 SecretKey</DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => void toggleBusinessStatus(channel.id, channel.status === "disabled" ? "active" : "disabled")}>{channel.status === "disabled" ? "启用" : "禁用"}</DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {pagedBusiness.length === 0 ? <EmptyRows colSpan={7} title="没有匹配凭证" description="调整状态或搜索关键词。" /> : null}
-                </TableBody>
-              </Table>
-              <TablePagination
-                total={visibleBusiness.length}
-                page={page}
-                pageSize={pageSize}
-                onPageChange={setPage}
-                onPageSizeChange={(size) => { setPage(1); setPageSize(size) }}
-              />
-            </CardContent>
-          </Card>
-        </TabsContent>
+            )}
+            tableActionsRight={(
+              <Button onClick={openCreateBusiness}>
+                <Plus className="size-4" />
+                创建业务渠道
+              </Button>
+            )}
+          >
+            <TableHeader>
+              <TableRow>
+                <TableHead>渠道</TableHead>
+                <TableHead>AppID</TableHead>
+                <TableHead>状态</TableHead>
+                <TableHead>到期时间</TableHead>
+                <TableHead>最近使用</TableHead>
+                <TableHead className="text-right">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {pagedBusiness.map((channel) => (
+                <TableRow key={channel.id}>
+                  <TableCell className="font-medium">{channel.name}</TableCell>
+                  <TableCell className="font-mono text-xs">{channel.appId}</TableCell>
+                  <TableCell><Badge variant={statusVariant(channel.status)}>{businessStatusLabels[channel.status]}</Badge></TableCell>
+                  <TableCell className="text-muted-foreground">{channel.expiresAt}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{channel.lastUsedAt}</TableCell>
+                  <TableCell className="text-right">
+                    {channel.status === "revoked" ? (
+                      <span className="text-xs text-muted-foreground">已轮换</span>
+                    ) : (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild><Button variant="ghost" size="icon-sm" aria-label={`操作 ${channel.name}`}><MoreHorizontal className="size-4" /></Button></DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => void rotateBusinessSecret(channel.id)}>更新密钥</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => void toggleBusinessStatus(channel.id, channel.status === "disabled" ? "active" : "disabled")}>{channel.status === "disabled" ? "启用" : "禁用"}</DropdownMenuItem>
+                          <DropdownMenuItem variant="destructive" onClick={() => void deleteBusinessChannel(channel.id)}>删除</DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+              {backendState !== "loading" && pagedBusiness.length === 0 ? <EmptyRows colSpan={6} title="没有匹配业务渠道" description="调整状态或搜索关键词。" /> : null}
+            </TableBody>
+          </Table>
+          <TablePagination
+            total={visibleBusiness.length}
+            page={businessPage}
+            pageSize={businessPageSize}
+            onPageChange={setBusinessPage}
+            onPageSizeChange={(size) => { setBusinessPage(1); setBusinessPageSize(size) }}
+          />
+        </CardContent>
+      </Card>
 
-        <TabsContent value="relay" className="mt-4">
-          <Card>
-            <CardHeader className="flex-row flex-wrap items-start justify-between gap-3">
-              <div>
-                <CardTitle>平台转发渠道</CardTitle>
-                <CardDescription>转发渠道由平台统一持有凭证，不对外签发。</CardDescription>
-              </div>
-              <Button onClick={() => { setRelayForm({ name: "", type: "webhook", endpoint: "" }); setCreateRelayOpen(true) }}><Plus className="size-4" />添加转发渠道</Button>
-            </CardHeader>
-            <CardContent className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>平台转发渠道</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Table
+            loading={backendState === "loading"}
+            loadingMode={pagedRelay.length === 0 ? "visible" : "silent"}
+            loadingLabel="正在加载转发渠道…"
+            refreshing={backendState === "loading"}
+            onRefresh={refreshChannels}
+            tableFilters={(
               <FilterBar
-                keyword={keyword}
-                onKeywordChange={(value) => { setPage(1); setKeyword(value) }}
-                selects={[{ value: status, onChange: (value) => { setPage(1); setStatus(value) }, placeholder: "状态", options: [{ value: "all", label: "全部状态" }, ...Object.entries(relayStatusLabels).map(([value, label]) => ({ value, label }))] }]}
+                keyword={relayKeyword}
+                onKeywordChange={(value) => { setRelayPage(1); setRelayKeyword(value) }}
+                selects={[{ value: relayStatus, onChange: (value) => { setRelayPage(1); setRelayStatus(value) }, placeholder: "状态", options: [{ value: "all", label: "全部状态" }, ...Object.entries(relayStatusLabels).map(([value, label]) => ({ value, label }))] }]}
               />
-              <Table>
-                <TableHeader>
-                  <TableRow><TableHead>渠道</TableHead><TableHead>类型</TableHead><TableHead>投递目标</TableHead><TableHead>状态</TableHead><TableHead>最近测试</TableHead><TableHead className="text-right">操作</TableHead></TableRow>
-                </TableHeader>
-                <TableBody>
-                  {pagedRelay.map((channel) => (
-                    <TableRow key={channel.id}>
-                      <TableCell className="font-medium">{channel.name}</TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">{channel.type}</TableCell>
-                      <TableCell className="text-muted-foreground">{channel.target}</TableCell>
-                      <TableCell><Badge variant={statusVariant(channel.status)}>{relayStatusLabels[channel.status]}</Badge></TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{channel.lastTestedAt}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
-                          <Button variant="ghost" size="sm" onClick={() => void handleTestRelayChannel(channel.id)}>测试</Button>
-                          <Button variant="ghost" size="sm" onClick={() => void toggleRelayStatus(channel.id)}>{channel.status === "active" ? "禁用" : "启用"}</Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {pagedRelay.length === 0 ? <EmptyRows colSpan={6} title="没有匹配转发渠道" description="调整状态或搜索关键词。" /> : null}
-                </TableBody>
-              </Table>
-              <TablePagination
-                total={visibleRelay.length}
-                page={page}
-                pageSize={pageSize}
-                onPageChange={setPage}
-                onPageSizeChange={(size) => { setPage(1); setPageSize(size) }}
-              />
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+            )}
+            tableActionsRight={(
+              <Button onClick={() => { setRelayForm({ name: "", type: "webhook", endpoint: "" }); setCreateRelayOpen(true) }}>
+                <Plus className="size-4" />
+                添加转发渠道
+              </Button>
+            )}
+          >
+            <TableHeader>
+              <TableRow>
+                <TableHead>渠道</TableHead>
+                <TableHead>投递目标</TableHead>
+                <TableHead>状态</TableHead>
+                <TableHead>最近测试</TableHead>
+                <TableHead className="text-right">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {pagedRelay.map((channel) => (
+                <TableRow key={channel.id}>
+                  <TableCell className="font-medium">{channel.name}</TableCell>
+                  <TableCell className="text-muted-foreground">{channel.target}</TableCell>
+                  <TableCell><Badge variant={statusVariant(channel.status)}>{relayStatusLabels[channel.status]}</Badge></TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{channel.lastTestedAt}</TableCell>
+                  <TableCell className="text-right">
+                    <Button variant="ghost" size="sm" onClick={() => void toggleRelayStatus(channel.id)}>{channel.status === "active" ? "禁用" : "启用"}</Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {backendState !== "loading" && pagedRelay.length === 0 ? <EmptyRows colSpan={5} title="没有匹配转发渠道" description="调整状态或搜索关键词。" /> : null}
+            </TableBody>
+          </Table>
+          <TablePagination
+            total={visibleRelay.length}
+            page={relayPage}
+            pageSize={relayPageSize}
+            onPageChange={setRelayPage}
+            onPageSizeChange={(size) => { setRelayPage(1); setRelayPageSize(size) }}
+          />
+        </CardContent>
+      </Card>
 
       <Dialog open={createBusinessOpen} onOpenChange={setCreateBusinessOpen}>
         <DialogContent className="sm:max-w-lg">

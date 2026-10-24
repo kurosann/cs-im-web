@@ -255,7 +255,14 @@ function SidebarTrigger({
   onClick,
   ...props
 }: React.ComponentProps<typeof Button>) {
-  const { toggleSidebar } = useSidebar()
+  const { isMobile, openMobile, setOpenMobile, toggleSidebar } = useSidebar()
+  function activateSidebar() {
+    if (isMobile) {
+      setOpenMobile(!openMobile)
+    } else {
+      toggleSidebar()
+    }
+  }
 
   return (
     <Button
@@ -264,14 +271,26 @@ function SidebarTrigger({
       variant="ghost"
       size="icon-sm"
       className={cn(className)}
+      onPointerDown={(event) => {
+        if (event.pointerType === "touch") {
+          event.preventDefault()
+          activateSidebar()
+        }
+      }}
       onClick={(event) => {
+        if ((event as React.MouseEvent<HTMLButtonElement> & { pointerType?: string }).pointerType === "touch") return
+
         onClick?.(event)
-        toggleSidebar()
+        if (isMobile) {
+          setOpenMobile(!openMobile)
+        } else {
+          toggleSidebar()
+        }
       }}
       {...props}
     >
       <PanelLeftIcon />
-      <span className="sr-only">Toggle Sidebar</span>
+      <span className="sr-only">切换导航菜单</span>
     </Button>
   )
 }

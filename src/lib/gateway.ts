@@ -33,7 +33,7 @@ export type RelayMessage = {
   content?: { url: string; fileName?: string }
   status: string
   receivedAt: string
-  source?: { sentAt?: string }
+  source?: { appId?: string; sentAt?: string }
 }
 
 export type RelayMessagePage = {
@@ -41,6 +41,17 @@ export type RelayMessagePage = {
   nextAfterSeq: number
   nextBeforeSeq: number
   hasMore: boolean
+}
+
+export type TranslateInput = {
+  text: string
+  targetLang: string
+}
+
+export type TranslateResult = {
+  text: string
+  translatedText: string
+  cached: boolean
 }
 
 export type ChannelHistoryFilter = {
@@ -188,5 +199,27 @@ export function sendRelayMessage(input: {
       text: input.text,
       ...(input.content ? { content: input.content } : {}),
     }),
+  })
+}
+
+export function retryAgentMessage(messageId: string) {
+  return request<RelayMessage>(`/admin/v1/messages/${encodeURIComponent(messageId)}/retry`, {
+    method: "POST",
+  })
+}
+
+export function requestChannelHistory(conversationId: string) {
+  return request<unknown>(
+    `/admin/v1/conversations/${encodeURIComponent(conversationId)}/history-requests`,
+    { method: "POST" },
+  )
+}
+
+export async function translateItems(input: TranslateInput[]) {
+  const items = input.filter((item) => item.text.trim())
+  if (!items.length) return []
+  return request<TranslateResult[]>("/api/workbench/translations", {
+    method: "POST",
+    body: JSON.stringify({ items }),
   })
 }

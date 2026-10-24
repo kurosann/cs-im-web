@@ -63,33 +63,33 @@ function normalizeEmployee(item: AIEmployee): AIEmployee {
 }
 
 export function listEmployees() {
-  return request<AIEmployee[]>("/api/v1/ai/employees").then((items) => (items ?? []).map(normalizeEmployee))
+  return request<AIEmployee[]>("/admin/v1/ai/employees").then((items) => (items ?? []).map(normalizeEmployee))
 }
 
 export function listEmployeeChannels() {
-  return request<ChannelBinding[]>("/api/v1/ai/employee-channels").then((items) => items ?? [])
+  return request<ChannelBinding[]>("/admin/v1/ai/employee-channels").then((items) => items ?? [])
 }
 
 export function createEmployee(name: string) {
-  return request<AIEmployee>("/api/v1/ai/employees", {
+  return request<AIEmployee>("/admin/v1/ai/employees", {
     method: "POST",
     body: JSON.stringify({ name }),
   }).then(normalizeEmployee)
 }
 
 export function updateEmployee(id: string, draft: EmployeeDraft) {
-  return request<AIEmployee>(`/api/v1/ai/employees/${id}`, {
+  return request<AIEmployee>(`/admin/v1/ai/employees/${id}`, {
     method: "PATCH",
     body: JSON.stringify(draft),
   }).then(normalizeEmployee)
 }
 
 export function deleteEmployee(id: string) {
-  return request<{ employeeId: string }>(`/api/v1/ai/employees/${id}`, { method: "DELETE" })
+  return request<{ employeeId: string }>(`/admin/v1/ai/employees/${id}`, { method: "DELETE" })
 }
 
 export function listEmployeeExecutions(id: string) {
-  return request<EmployeeExecution[]>(`/api/v1/ai/employees/${id}/executions?limit=200`).then((items) => items ?? [])
+  return request<EmployeeExecution[]>(`/admin/v1/ai/employees/${id}/executions?limit=200`).then((items) => items ?? [])
 }
 
 export type TestTurn = {
@@ -118,7 +118,7 @@ export type TestEmployeeResult = {
 }
 
 export function testEmployee(id: string, input: TestEmployeeInput) {
-  return request<TestEmployeeResult>(`/api/v1/ai/employees/${id}/test`, {
+  return request<TestEmployeeResult>(`/admin/v1/ai/employees/${id}/test`, {
     method: "POST",
     body: JSON.stringify({
       prompt: input.prompt,

@@ -9,8 +9,8 @@ export async function GET(
   const relayParams = new URLSearchParams({ limit: params.get("limit") ?? "20" })
   const beforeSeq = params.get("beforeSeq")
   if (beforeSeq) relayParams.set("beforeSeq", beforeSeq)
-  return relayJSON(
-    request,
-    `/api/v1/relays/conversations/${encodeURIComponent(conversationId)}/messages?${relayParams.toString()}`,
-  )
+	return relayJSON(
+		request,
+		`/api/v1/relays/conversations/${encodeURIComponent(conversationId)}/messages?${relayParams.toString()}`,
+	)
 }

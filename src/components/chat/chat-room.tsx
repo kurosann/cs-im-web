@@ -2,6 +2,7 @@
 
 import {
   ArrowUpIcon,
+  ArrowLeft,
   CheckIcon,
   ChevronDownIcon,
   CopyIcon,
@@ -9,6 +10,7 @@ import {
   Headphones,
   Languages,
   MessageSquare,
+  RefreshCcwIcon,
   RotateCcw,
   Sparkles,
   User,
@@ -24,7 +26,6 @@ import {
   knowledgeBases,
   knowledgeDocs,
   quickReplies,
-  quickTranslations,
   translateDraft,
   type ChatStatus,
 } from "@/data/mock/chat"
@@ -47,7 +48,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   InputGroup,
   InputGroupAddon,
@@ -93,9 +93,12 @@ import {
   GatewayApiError,
   listConversations,
   listRelayMessages,
+  retryAgentMessage,
   markConversationRead,
+  requestChannelHistory,
   reopenConversation,
   sendRelayMessage,
+  translateItems,
   type RelayMessage,
 } from "@/lib/gateway"
 import { cn } from "@/lib/utils"
@@ -109,7 +112,12 @@ type ChatMessage = {
   translated?: string
   time: string
   seq: number
+  status?: string
   senderName?: string
+}
+
+type OptimisticChatMessage = ChatMessage & {
+  actualId?: string
 }
 
 type Tone = "正式" | "友好" | "简洁" | "安抚"
@@ -274,10 +282,12 @@ function ConversationList({
   activeId,
   onSelect,
   items,
+  className,
 }: {
   activeId: string
   onSelect: (id: string) => void
   items: Conversation[]
+  className?: string
 }) {
   const sortedItems = useMemo(() => {
     return [...items].sort((left, right) => {
@@ -291,15 +301,18 @@ function ConversationList({
   }, [items])
 
   return (
-    <Card className="flex h-full w-full max-w-[300px] flex-col rounded-xl xl:w-[300px]">
+    <Card className={cn(
+      "flex h-full w-full overflow-hidden flex-col rounded-xl xl:w-[300px] xl:max-w-[300px]",
+      className,
+    )}>
       <CardHeader className="pb-1">
         <CardTitle className="flex items-center gap-2 text-base">
           <MessageSquare className="size-4" />
           会话
         </CardTitle>
       </CardHeader>
-      <CardContent className="min-h-0 flex-1 px-0 pb-0">
-        <ScrollArea className="h-80 sm:h-[560px] xl:h-full">
+      <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden px-0 pb-0">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <div className="w-full min-w-0 px-3 pb-3">
             {sortedItems.map((conversation) => {
               const active = conversation.conversationId === activeId
@@ -311,9 +324,10 @@ function ConversationList({
                 <button
                   key={conversation.conversationId}
                   type="button"
+                  style={{ width: "100%" }}
                   onClick={() => onSelect(conversation.conversationId)}
                   className={cn(
-                    "block w-full min-w-0 overflow-hidden rounded-lg p-3 text-left transition-colors hover:bg-muted/60",
+                    "block w-full min-w-0 overflow-hidden rounded-lg p-2.5 text-left transition-colors hover:bg-muted/60",
                     active && "bg-sidebar-border"
                   )}
                 >
@@ -331,16 +345,16 @@ function ConversationList({
                         </span>
                       ) : null}
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="min-w-0 flex-1 truncate text-sm font-semibold">{conversation.customerName || conversation.customerId}</p>
-                        <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
+                    <div className="min-w-0 flex-1 overflow-hidden">
+                      <div className="flex min-w-0 items-center justify-between gap-2">
+                        <p className="w-full min-w-0 truncate text-sm font-semibold">{conversation.customerName || conversation.customerId}</p>
+                        <span className="w-auto shrink-0 whitespace-nowrap text-xs text-muted-foreground">
                           {formatChatTime(conversation.lastMessageAt ?? conversation.updatedAt, false)}
                         </span>
                       </div>
-                      <p className="mt-1 truncate text-xs text-muted-foreground">{conversation.channel || "未知渠道"}</p>
-                      <p className="mt-1.5 truncate text-xs text-muted-foreground">{conversation.lastMessage || "暂无消息"}</p>
-                      <div className="mt-2 flex items-center gap-2">
+                      <p className="mt-1 w-full truncate text-xs text-muted-foreground">{conversation.channel || "未知渠道"}</p>
+                      <p className="mt-1.5 w-full truncate text-xs text-muted-foreground">{conversation.lastMessage || "暂无消息"}</p>
+                      <div className="mt-2 flex w-full items-center gap-2 overflow-hidden">
                         <Badge variant={status.variant}>{status.label}</Badge>
                         <Badge variant={(conversation.replyStatus ?? "unreplied") === "unreplied" ? "warning" : "outline"}>
                           {(conversation.replyStatus ?? "unreplied") === "unreplied" ? "未回复" : "已回复"}
@@ -352,7 +366,7 @@ function ConversationList({
               )
             })}
           </div>
-        </ScrollArea>
+        </div>
       </CardContent>
     </Card>
   )
@@ -370,13 +384,20 @@ export function ChatRoom() {
   const [knowledgeBaseId, setKnowledgeBaseId] = useState<string | null>(null)
   const [loadingMessages, setLoadingMessages] = useState(false)
   const [sending, setSending] = useState(false)
+  const [resendingMessageId, setResendingMessageId] = useState<string | null>(null)
   const [hasMore, setHasMore] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const [closingConversation, setClosingConversation] = useState(false)
+  const [mobileView, setMobileView] = useState<"conversations" | "chat">("conversations")
+  const [optimisticMessages, setOptimisticMessages] = useState<Record<string, OptimisticChatMessage[]>>({})
+  const historyProbeAttemptedRef = useRef(false)
+  const [translatedMessages, setTranslatedMessages] = useState<Record<string, string>>({})
   const realtimeControllerRef = useRef<AbortController | null>(null)
+  const loadingOlderRef = useRef(false)
   const activeConversationIdRef = useRef("")
   const pendingMessagesRef = useRef(new Map<string, RelayMessage[]>())
   const draftTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const translatingMessagesRef = useRef<Set<string>>(new Set())
 
   const conversation = conversations.find((item) => item.conversationId === activeConversationId)
   const activeConversationClosed = conversation?.status === "closed"
@@ -402,6 +423,7 @@ export function ChatRoom() {
     setMessages([])
     setHasMore(false)
     setLoadingMessages(true)
+    setMobileView("chat")
   }, [])
 
   const loadConversations = useCallback(async () => {
@@ -444,7 +466,7 @@ export function ChatRoom() {
       incoming.forEach((item) => {
         if (item.messageId) messageMap.set(item.messageId, item)
       })
-      return [...messageMap.values()].sort((left, right) => messageTimestamp(right) - messageTimestamp(left))
+      return [...messageMap.values()].sort((left, right) => messageTimestamp(left) - messageTimestamp(right))
     })
   }, [])
 
@@ -466,6 +488,49 @@ export function ChatRoom() {
     textarea.style.height = "auto"
     textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`
   }, [draft])
+
+  useEffect(() => {
+    if (!showTranslation) return
+
+    const key = (messageId: string) => `${messageId}:${translationLanguage}`
+
+    const missing = messages.filter((message) => {
+      if (!message.text?.trim()) return false
+      const cacheKey = key(message.messageId)
+      return !translatedMessages[cacheKey] && !translatingMessagesRef.current.has(cacheKey)
+    })
+    if (!missing.length) return
+
+    const pendingKeys = missing.map((message) => key(message.messageId))
+    pendingKeys.forEach((item) => translatingMessagesRef.current.add(item))
+    let cancelled = false
+
+    void translateItems(
+      missing.map((message) => ({ text: message.text ?? "", targetLang: translationLanguage })),
+    )
+      .then((results) => {
+        if (cancelled) return
+        setTranslatedMessages((current) => {
+          const next = { ...current }
+          missing.forEach((message, index) => {
+            next[key(message.messageId)] = results[index]?.translatedText ?? ""
+          })
+          return next
+        })
+      })
+      .catch(() => {
+        missing.forEach((message) => {
+          setTranslatedMessages((current) => ({ ...current, [key(message.messageId)]: "" }))
+        })
+      })
+      .finally(() => {
+        pendingKeys.forEach((item) => translatingMessagesRef.current.delete(item))
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [messages, showTranslation, translationLanguage, translatedMessages])
 
   useEffect(() => {
     const session = readSession()
@@ -499,21 +564,48 @@ export function ChatRoom() {
           try {
             const event = JSON.parse(line.slice(6)) as {
               type?: string
-              data?: RelayMessage | Conversation
+              data?: RelayMessage | Conversation | RelayMessage[]
+            }
+            const messageEvent = event.type === "message.created" || event.type === "message.status_changed"
+              ? (event.data ?? null) as RelayMessage | null
+              : null
+            if (messageEvent?.messageId) {
+              if (messageEvent.status === "sent" || messageEvent.status === "failed") {
+                setOptimisticMessages((current) => {
+                  const isAffected = Object.values(current).some((items) => (
+                    items.some((item) => item.actualId === messageEvent.messageId)
+                  ))
+                  if (!isAffected) return current
+                  const next: Record<string, OptimisticChatMessage[]> = {}
+                  for (const [conversationId, items] of Object.entries(current)) {
+                    next[conversationId] = items.filter((item) => item.actualId !== messageEvent.messageId)
+                  }
+                  return next
+                })
+                setResendingMessageId((current) => current === messageEvent.messageId ? null : current)
+              }
             }
             if (event.type === "conversation.created" && event.data && "conversationId" in event.data) {
-              selectConversation(event.data.conversationId)
+              if (!activeConversationIdRef.current) {
+                selectConversation(event.data.conversationId)
+              }
               void loadConversations()
               continue
             }
             if (event.type === "message.created" && event.data && "messageId" in event.data) {
-              if (event.data.conversationId === activeConversationIdRef.current) {
+              if (
+                event.data.conversationId === activeConversationIdRef.current
+                && !(event.data.sender?.role === "agent" && event.data.status === "received")
+              ) {
                 upsertMessages([event.data])
               } else {
                 const pendingMessages = pendingMessagesRef.current.get(event.data.conversationId) ?? []
                 pendingMessagesRef.current.set(event.data.conversationId, [...pendingMessages, event.data])
-                selectConversation(event.data.conversationId)
               }
+              void loadConversations()
+            }
+            if (event.type === "message.created_batch" && Array.isArray(event.data)) {
+              upsertMessages(event.data)
               void loadConversations()
             }
             if (event.type === "conversation.closed") {
@@ -521,6 +613,11 @@ export function ChatRoom() {
             }
             if (event.type === "conversation.reopened") {
               void loadConversations()
+            }
+            if (event.type === "message.status_changed" && event.data && "messageId" in event.data) {
+              if (event.data.status === "sent" || event.data.status === "failed") {
+                upsertMessages([event.data])
+              }
             }
           } catch {
             continue
@@ -552,6 +649,7 @@ export function ChatRoom() {
   useEffect(() => {
     if (!activeConversationId) return
     let cancelled = false
+    historyProbeAttemptedRef.current = false
 
     async function initialize() {
       setLoadingMessages(true)
@@ -565,6 +663,9 @@ export function ChatRoom() {
         pendingMessagesRef.current.delete(activeConversationId)
         upsertMessages([...page.items, ...pendingMessages])
         setHasMore(page.hasMore)
+        if (page.items.length === 0) {
+          void requestChannelHistory(activeConversationId).catch(() => undefined)
+        }
       } catch (error) {
         if (!cancelled) {
           const message = error instanceof GatewayApiError ? error.message : "获取历史消息失败。"
@@ -583,23 +684,39 @@ export function ChatRoom() {
   }, [activeConversationId, selectConversation, upsertMessages])
 
   const displayMessages = useMemo<ChatMessage[]>(() => {
-    return messages.map((message) => ({
+    const pendingActualIds = new Set(
+      (optimisticMessages[activeConversationId] ?? [])
+        .map((item) => item.actualId)
+        .filter(Boolean),
+    )
+    const persisted = messages.map((message) => ({
       id: message.messageId,
       role: message.sender?.role ?? "system",
       type: message.type,
       text: message.text ?? "",
       content: message.content,
-      translated: quickTranslations[message.text ?? ""]?.[translationLanguage],
+      translated: translatedMessages[`${message.messageId}:${translationLanguage}`] || undefined,
       time: formatChatTime(message.source?.sentAt ?? message.receivedAt ?? ""),
       seq: message.seq,
+      status: message.status === "failed" && message.source?.appId
+        ? "sent"
+        : message.status === "received" && !message.source?.appId
+          ? "sending"
+          : message.status,
       senderName:
         message.sender?.role === "agent"
-          ? operatorName || message.sender.id
+          ? message.source?.appId
+            ? "未知"
+            : operatorName || message.sender.id
           : message.sender?.role === "ai"
             ? "AI 客服"
             : undefined,
-    }))
-  }, [messages, operatorName, translationLanguage])
+    })).filter((message) => !pendingActualIds.has(message.id))
+    return [
+      ...persisted,
+      ...(optimisticMessages[activeConversationId] ?? []),
+    ]
+  }, [activeConversationId, messages, operatorName, optimisticMessages, translatedMessages, translationLanguage])
 
   const firstUnreadIndex = initialReadSeq === null
     ? -1
@@ -617,17 +734,92 @@ export function ChatRoom() {
     const value = content.trim()
     if (!value || sending || !activeConversationId) return
     setSending(true)
+    const optimisticId = `pending-${activeConversationId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    setOptimisticMessages((current) => {
+      const items = current[activeConversationId] ?? []
+      return {
+        ...current,
+        [activeConversationId]: [...items, {
+          id: optimisticId,
+          role: "agent",
+          type: "text",
+          text: value,
+          time: formatChatTime(new Date().toISOString()),
+          seq: Number.MAX_SAFE_INTEGER,
+          status: "sending",
+          senderName: operatorName || "未知",
+        }],
+      }
+    })
     try {
       const message = await sendRelayMessage({
         conversationId: activeConversationId,
         text: value,
       })
-      upsertMessages([message])
+      setOptimisticMessages((current) => ({
+        ...current,
+        [activeConversationId]: (current[activeConversationId] ?? []).map((item) => (
+          item.id === optimisticId
+            ? { ...item, actualId: message.messageId }
+            : item
+        )),
+      }))
       void loadConversations()
       setDraft("")
     } catch (error) {
+      setOptimisticMessages((current) => {
+        const items = current[activeConversationId] ?? []
+        return {
+          ...current,
+          [activeConversationId]: items.map((item) => (
+            item.id === optimisticId ? { ...item, status: "failed" } : item
+          )),
+        }
+      })
       const message = error instanceof GatewayApiError ? error.message : "发送客服消息失败。"
       toast.error(message)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  async function resendOptimisticMessage(message: ChatMessage) {
+    if (sending || !activeConversationId) return
+    setSending(true)
+    setOptimisticMessages((current) => {
+      const items = current[activeConversationId] ?? []
+      return {
+        ...current,
+        [activeConversationId]: items.map((item) => (
+          item.id === message.id ? { ...item, status: "sending" } : item
+        )),
+      }
+    })
+    try {
+      const sent = await sendRelayMessage({
+        conversationId: activeConversationId,
+        text: message.text,
+      })
+      setOptimisticMessages((current) => ({
+        ...current,
+        [activeConversationId]: (current[activeConversationId] ?? []).filter(
+          (item) => item.id !== message.id,
+        ),
+      }))
+      upsertMessages([sent])
+      void loadConversations()
+    } catch (error) {
+      setOptimisticMessages((current) => {
+        const items = current[activeConversationId] ?? []
+        return {
+          ...current,
+          [activeConversationId]: items.map((item) => (
+            item.id === message.id ? { ...item, status: "failed" } : item
+          )),
+        }
+      })
+      const errorMessage = error instanceof GatewayApiError ? error.message : "重新发送失败。"
+      toast.error(errorMessage)
     } finally {
       setSending(false)
     }
@@ -645,6 +837,18 @@ export function ChatRoom() {
       }, 1600)
     } catch {
       toast.error("复制消息失败。")
+    }
+  }
+
+  async function resendMessage(message: ChatMessage) {
+    setResendingMessageId(message.id)
+    try {
+      await retryAgentMessage(message.id)
+      void loadConversations()
+    } catch (error) {
+      setResendingMessageId(null)
+      const errorMessage = error instanceof GatewayApiError ? error.message : "重新发送失败。"
+      toast.error(errorMessage)
     }
   }
 
@@ -693,8 +897,9 @@ export function ChatRoom() {
   }
 
   async function loadOlder() {
-    const oldestSeq = messages[messages.length - 1]?.seq ?? 0
-    if (!hasMore || !oldestSeq || loadingMessages || !activeConversationId) return
+    const oldestSeq = messages[0]?.seq ?? 0
+    if (!hasMore || !oldestSeq || loadingMessages || loadingOlderRef.current || !activeConversationId) return
+    loadingOlderRef.current = true
     setLoadingMessages(true)
     try {
       const page = await listRelayMessages(activeConversationId, oldestSeq)
@@ -704,25 +909,84 @@ export function ChatRoom() {
       const message = error instanceof GatewayApiError ? error.message : "加载历史消息失败。"
       toast.error(message)
     } finally {
+      loadingOlderRef.current = false
       setLoadingMessages(false)
     }
   }
 
+  async function loadOlderWithHistory() {
+    const oldestSeq = messages[0]?.seq ?? 0
+    if (!activeConversationId || loadingMessages || loadingOlderRef.current) return
+    setLoadingMessages(true)
+    loadingOlderRef.current = true
+    try {
+      await requestChannelHistory(activeConversationId)
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 700))
+        const page = await listRelayMessages(activeConversationId, oldestSeq)
+        if (page.items.length > 0 || page.hasMore === false) {
+          upsertMessages(page.items)
+          setHasMore(page.hasMore)
+          return
+        }
+      }
+    } catch (error) {
+      const message = error instanceof GatewayApiError ? error.message : "加载历史消息失败。"
+      toast.error(message)
+    } finally {
+      loadingOlderRef.current = false
+      setLoadingMessages(false)
+    }
+  }
+
+  function handleMessagesScroll(event: React.UIEvent<HTMLDivElement>) {
+    if (event.currentTarget.scrollTop > 80) return
+    void loadOlderWithHistory()
+  }
+
+  useEffect(() => {
+    if (!activeConversationId || loadingMessages || messages.length === 0 || hasMore) return
+    if (historyProbeAttemptedRef.current) return
+    historyProbeAttemptedRef.current = true
+    void loadOlderWithHistory()
+  }, [activeConversationId, loadingMessages, messages, hasMore])
+
   return (
-    <div className="grid gap-4 min-h-0 xl:h-[calc(100dvh-118px)] xl:min-h-[620px] xl:grid-cols-[300px_minmax(0,1fr)_322px]">
+    <div className="grid h-[calc(100dvh-96px)] min-h-0 gap-3 xl:h-[calc(100dvh-118px)] xl:min-h-[620px] xl:grid-cols-[300px_minmax(0,1fr)_322px]">
       <ConversationList
         activeId={activeConversationId}
-        onSelect={selectConversation}
+        onSelect={(conversationId) => {
+          selectConversation(conversationId)
+          setMobileView("chat")
+        }}
         items={conversations}
+        className={cn(
+          "min-h-0 w-full max-w-none xl:h-full xl:w-[300px] xl:max-w-[300px]",
+          mobileView === "conversations" ? "" : "hidden xl:flex",
+        )}
       />
 
-      <Card className="flex min-h-[620px] flex-col gap-0 rounded-xl py-0">
+      <Card
+        className={cn(
+          "flex h-full min-h-[520px] flex-col gap-0 rounded-xl py-0 xl:min-h-0",
+          mobileView === "chat" ? "flex" : "hidden xl:flex",
+        )}
+      >
         <CardHeader className="border-b pb-0 pt-3">
           <div>
             <CardTitle>{conversation ? conversation.customerName || conversation.customerId : "选择会话"}</CardTitle>
             <CardDescription>{conversation ? conversation.channel || "未知渠道" : null}</CardDescription>
           </div>
           <CardAction className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mr-2 xl:hidden"
+              onClick={() => setMobileView("conversations")}
+            >
+              <ArrowLeft className="size-4" />
+              返回
+            </Button>
             <div className="relative flex items-center">
               <div
                 aria-hidden={!showTranslation}
@@ -785,10 +1049,10 @@ export function ChatRoom() {
         <CardContent className="min-h-0 flex-1 px-0 py-0">
           <MessageScrollerProvider autoScroll defaultScrollPosition={readDividerId ? "last-anchor" : "end"}>
             <MessageScroller>
-              <MessageScrollerViewport>
+              <MessageScrollerViewport onScroll={handleMessagesScroll}>
                 <MessageScrollerContent className="gap-3 px-3 py-3">
                   {loadingMessages ? (
-                    <MessageScrollerItem className="flex justify-center py-8">
+                    <MessageScrollerItem className="flex justify-center py-1">
                       <Marker role="status" aria-live="polite">
                         <MarkerIcon>
                           <Spinner />
@@ -798,23 +1062,16 @@ export function ChatRoom() {
                         </MarkerContent>
                       </Marker>
                     </MessageScrollerItem>
-                  ) : hasMore ? (
-                    <MessageScrollerItem className="flex justify-center">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        aria-label="加载更早消息"
-                        onClick={() => void loadOlder()}
-                      >
-                        加载更早消息
-                      </Button>
-                    </MessageScrollerItem>
-                  ) : null}
-                  {!loadingMessages && displayMessages.length === 0 ? (
+                  ) : !loadingMessages && displayMessages.length === 0 ? (
                     <MessageScrollerItem>
                       <p className="py-8 text-center text-sm text-muted-foreground">
                         等待客户消息…
                       </p>
+                    </MessageScrollerItem>
+                  ) : null}
+                  {!loadingMessages && displayMessages.length > 0 && !hasMore ? (
+                    <MessageScrollerItem>
+                      <p className="py-1 text-center text-xs text-muted-foreground">到底了</p>
                     </MessageScrollerItem>
                   ) : null}
                   {displayMessages.map((message, index) => {
@@ -887,6 +1144,27 @@ export function ChatRoom() {
                               </Bubble>
                               <MessageFooter className="gap-1.5">
                                 <span>{message.time}</span>
+                                {isAgent && message.status === "failed" ? (
+                                  resendingMessageId === message.id ? (
+                                    <Spinner className="size-3 opacity-70" />
+                                  ) : (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      title="重新发送"
+                                      aria-label="重新发送"
+                                      className="group/status h-6 gap-1 rounded-full px-2 text-xs text-red-500 hover:text-red-500"
+                                      onClick={() => void resendMessage(message)}
+                                    >
+                                      <span className="group-hover/status:hidden">发送失败</span>
+                                      <span className="hidden group-hover/status:block">重新发送</span>
+                                      <RefreshCcwIcon className="size-3" />
+                                    </Button>
+                                  )
+                                ) : null}
+                                {isAgent && message.status === "sending" ? (
+                                  <Spinner className="size-3 opacity-70" />
+                                ) : null}
                                 {message.text ? (
                                   <Button
                                     variant="ghost"
@@ -1005,7 +1283,7 @@ export function ChatRoom() {
         </CardContent>
       </Card>
 
-      <Card className="flex h-full flex-col rounded-xl">
+      <Card className="hidden h-full flex-col rounded-xl xl:flex">
         <CardHeader className="pb-1">
           <CardTitle className="text-base">辅助面板</CardTitle>
           <CardDescription>切换 AI 建议、快捷回复和知识库。</CardDescription>

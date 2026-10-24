@@ -6,6 +6,9 @@ type AdminProxyContext = {
 }
 
 const ALLOWED_PATHS = [
+  /^iam\/channel-access\/apps$/,
+  /^iam\/channel-access\/apps\/[^/]+$/,
+  /^iam\/channel-access\/apps\/[^/]+\/(enable|disable|revoke|rotate)$/,
   /^iam\/tokens$/,
   /^iam\/tokens\/[^/]+$/,
   /^iam\/tokens\/[^/]+\/(enable|disable|rotate)$/,

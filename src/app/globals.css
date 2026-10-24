@@ -122,6 +122,18 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+@layer base {
+  html,
+  body,
+  button,
+  a,
+  [role='button'] {
+    touch-action: manipulation;
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
 @utility no-scrollbar {
   scrollbar-width: none;
 

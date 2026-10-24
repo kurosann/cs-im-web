@@ -13,6 +13,7 @@ export type ChannelCredential = {
   appId: string
   name: string
   status: ChannelCredentialStatus
+  scopes?: string[]
   expiresAt?: string | null
   lastUsedAt?: string | null
 }
@@ -177,12 +178,16 @@ export function registerBusinessApp(input: { displayName: string; serviceKey: st
   })
 }
 
-export function issueChannelCredential(input: { appId: string; name: string }) {
+export function issueChannelCredential(input: { appId: string; name: string; expiresAt?: string }) {
   return request<IssuedCredential & { credential: ChannelCredential }>(
     "/admin/v1/iam/channel-access/apps",
     {
       method: "POST",
-      body: JSON.stringify(input),
+      body: JSON.stringify({
+        appId: input.appId,
+        name: input.name,
+        expiresAt: input.expiresAt,
+      }),
     },
   )
 }

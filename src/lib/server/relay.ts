@@ -10,7 +10,7 @@ export async function requireWebSession(request: Request) {
 	if (!token) {
 		return Response.json({ code: "UNAUTHORIZED", message: "请先登录。" }, { status: 401 })
 	}
-	const response = await fetch(`${apiBase}/api/v1/auth/me`, {
+	const response = await fetch(`${apiBase}/auth/v1/management/me`, {
 		headers: { Authorization: `Bearer ${token}` },
 	})
 	const payload = (await response.json().catch(() => null)) as ApiEnvelope<unknown> | null
